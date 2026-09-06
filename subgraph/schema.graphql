@@ -1,0 +1,37 @@
+type Agent @entity {
+  id: ID!
+  name: String!
+  parent: Agent
+  children: [Agent!]! @derivedFrom(field: "parent")
+  capabilities: BigInt!
+  spendCap: BigInt!
+  spendRemaining: BigInt!
+  queryBudget: BigInt!
+  queryRemaining: BigInt!
+  expiry: BigInt!
+  depth: Int!
+  epoch: BigInt!
+  revoked: Boolean!
+  reclaimed: Boolean!
+  createdAt: BigInt!
+}
+
+type Escalation @entity {
+  id: ID!
+  parent: Agent!
+  attemptedBy: Bytes!
+  label: String!
+  reason: String!
+  proposedBy: String!
+  blockNumber: BigInt!
+  timestamp: BigInt!
+}
+
+type BudgetFlow @entity {
+  id: ID!
+  from: Agent!
+  to: Agent
+  amount: BigInt!
+  kind: String!
+  timestamp: BigInt!
+}

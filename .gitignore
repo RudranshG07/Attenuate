@@ -1,0 +1,32 @@
+# secrets
+.env
+.env.*
+!.env.example
+*.key
+keystore/
+
+# node
+node_modules/
+dist/
+.next/
+*.tsbuildinfo
+
+# foundry
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+contracts/lib/
+
+# subgraph
+subgraph/build/
+subgraph/generated/
+
+# indexer state
+indexer/.cursor
+
+# docs
+*.md
+!/README.md
+
+# os
+.DS_Store

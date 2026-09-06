@@ -1,0 +1,529 @@
+# Attenuate — Build Spec
+
+Implementation spec. No strategy, no judging notes.
+
+**Stack:** Solidity 0.8.26 · Foundry · ENSv2 on Sepolia · TypeScript / Node 20 · Ledger Key Ring CLI (`wallet-cli ring`) · The Graph (Subgraph MCP, Substreams gRPC) · x402 · Next.js + viem
+
+> **DEADLINE: Sunday 13 September 2026, 12:00 pm EDT (9:30 pm IST). Internal freeze Friday 12 Sep.**
+>
+> **This file must be committed to the submission repo.** ETHOnline requires that spec-driven workflows include all spec files, prompts and planning artifacts so judges can see how the AI was directed. Keep a `prompts/` directory alongside it and commit as you go.
+>
+> **Every team member needs real authored commits.** Submissions relying entirely on AI without meaningful team contribution may be ineligible for partner prizes.
+
+---
+
+## ⚠️ Read before writing any code
+
+**1. Everything marked `[UNVERIFIED]` must be confirmed against live ENSv2 contracts on Sepolia before implementation.** ENSv2 is three months old. Do not invent function signatures. Pull real ABIs from Sepolia and from the `ens-cli` source (`github.com/ensdomains/ens-cli`). If a signature in this spec conflicts with the real ABI, the real ABI wins — update this file.
+
+**2. Enforcement lives in contracts, not TypeScript.** The broker must never be the thing that decides whether a grant is legal. It is tempting and easier to write the subset check in `broker/grant.ts`. Do not. The check belongs in `AttenuatedSubregistry.register()`. A TypeScript-only check makes the entire project theatre.
+
+**3. Build order is strict.** Do not scaffold all directories at once.
+
+```
+1. contracts/  — attenuation invariant + fuzz tests GREEN before anything else
+2. ENS integration — real subregistry, real subname, real resolver write
+3. Ledger — Key Ring root mandate
+4. Graph — subgraph, MCP, Substreams, x402
+5. web/ — one screen
+```
+
+---
+
+## 1. Repo layout
+
+```
+contracts/
+  src/
+    CapabilityRegistry.sol
+    AttenuatedSubregistry.sol
+    Executor.sol
+    interfaces/IENSv2.sol          [UNVERIFIED] — generate from live ABI
+  test/
+    Attenuation.t.sol              fuzz the invariant
+    Escalation.t.sol               the 12 named scenarios
+    Revocation.t.sol               epoch semantics
+  script/Deploy.s.sol
+broker/
+  keyring.ts                       wallet-cli ring wrapper
+  mandate.ts                       EIP-712 signing
+  grant.ts                         builds calldata; does NOT decide legality
+  secrets.ts                       releases scoped capability, never a key
+keyring-remote/
+  enroll.ts                        Key Ring on a host with no USB port
+agent/
+  monitor.ts                       position health loop
+  decide.ts                        act vs delegate vs escalate
+mcp-server/
+  index.ts
+  SKILL.md
+subgraph/
+  schema.graphql
+  subgraph.yaml
+  src/mapping.ts
+indexer/
+  substreams-trigger.ts            gRPC, cursor resumption, reorg handling
+web/
+  app/tree/page.tsx
+  app/page.tsx                     landing — build LAST
+FEEDBACK.md                        Ledger DX notes, write as you go
+```
+
+---
+
+## 2. Data model
+
+```solidity
+struct Grant {
+    uint256 capabilities;        // bitmask, see CapabilityRegistry
+    uint256 spendCap;            // wei ceiling for this node's subtree
+    uint256 queryBudget;         // x402 units
+    uint256 remaining;           // unallocated portion of spendCap
+    uint64  expiry;              // unix seconds
+    uint16  maxDepth;            // further delegation hops allowed
+    bool    readOnly;
+    bytes32 parent;              // namehash
+    uint64  parentEpochAtGrant;
+    uint64  epoch;
+}
+
+mapping(bytes32 => Grant) public grants;   // namehash => Grant
+bytes32 public constant ROOT = bytes32(0);
+```
+
+### CapabilityRegistry
+
+Bit index → semantic meaning. Keep it small; 8 bits is enough for the demo.
+
+| Bit | Capability | Target constraint |
+|---|---|---|
+| 0 | `swap.uniswap` | Uniswap router only |
+| 1 | `lend.aave.supply` | Aave pool only |
+| 2 | `lend.aave.repay` | Aave pool only |
+| 3 | `lend.aave.withdraw` | Aave pool only |
+| 4 | `erc20.approve` | allowlisted tokens |
+| 5 | `transfer.native` | — |
+| 6 | `data.graph.read` | no onchain target |
+| 7 | `delegate` | may call `register()` |
+
+```solidity
+mapping(uint8 => address) public allowedTarget;   // capBit => contract
+mapping(uint8 => bytes4)  public allowedSelector; // capBit => function
+```
+
+---
+
+## 3. The attenuation invariant — core of the project
+
+```solidity
+function _assertAttenuated(Grant memory p, Grant memory c) internal pure {
+    require(c.capabilities & p.capabilities == c.capabilities, "SCOPE_WIDENED");
+    require(c.spendCap    <= p.remaining,   "CAP_EXCEEDS_UNALLOCATED");
+    require(c.queryBudget <= p.queryBudget, "BUDGET_WIDENED");
+    require(c.expiry      <= p.expiry,      "EXPIRY_EXTENDED");
+    require(c.maxDepth     < p.maxDepth,    "DEPTH_EXCEEDED");
+    require(!p.readOnly || c.readOnly,      "READONLY_ESCALATION");
+}
+```
+
+`c & p == c` is the subset test. Any bit the child sets that the parent lacks is dropped by the AND, equality fails, revert.
+
+**`p.remaining`, not `p.spendCap`.** Otherwise a parent holding 100 grants 100 to each of two children.
+
+### Fuzz test (must pass before anything else)
+
+```solidity
+function testFuzz_ChildNeverExceedsParent(Grant memory p, Grant memory c) public {
+    vm.assume(_isWellFormed(p) && _isWellFormed(c));
+    try this.exposed_assertAttenuated(p, c) {
+        assertEq(c.capabilities & p.capabilities, c.capabilities);
+        assertLe(c.spendCap, p.remaining);
+        assertLe(c.expiry, p.expiry);
+        assertLt(c.maxDepth, p.maxDepth);
+        if (p.readOnly) assertTrue(c.readOnly);
+    } catch {}
+}
+```
+
+---
+
+## 4. AttenuatedSubregistry
+
+```solidity
+function register(
+    bytes32 parentNode,
+    string calldata label,
+    address owner,
+    Grant calldata childGrant
+) external returns (bytes32 childNode) {
+    Grant storage p = grants[parentNode];
+
+    require(_hasRole(msg.sender, parentNode, ROLE_GRANT), "NOT_GRANTOR");
+    require(isLive(parentNode), "PARENT_DEAD");
+    _assertAttenuated(p, childGrant);
+
+    p.remaining -= childGrant.spendCap;          // allocate
+
+    childNode = keccak256(abi.encodePacked(parentNode, keccak256(bytes(label))));
+    require(grants[childNode].epoch == 0, "EXISTS");
+
+    grants[childNode] = childGrant;
+    grants[childNode].remaining          = childGrant.spendCap;
+    grants[childNode].parent             = parentNode;
+    grants[childNode].parentEpochAtGrant = p.epoch;
+    grants[childNode].epoch              = 1;
+
+    _mintSubname(parentNode, label, owner);      // [UNVERIFIED] ENSv2 registry call
+    _writeGrantToResolver(childNode, childGrant); // [UNVERIFIED] PermissionedResolver
+
+    emit Granted(parentNode, childNode, label, owner, childGrant);
+}
+```
+
+**Requirement:** an over-privileged child must be unmintable. Not rejected later — never created.
+
+---
+
+## 5. Epoch revocation — O(1) subtree kill
+
+```solidity
+function revoke(bytes32 node) external {
+    require(_hasRole(msg.sender, node, ROLE_REVOKE), "NOT_REVOKER");
+    Grant storage g = grants[node];
+    g.epoch++;                                   // single SSTORE
+    grants[g.parent].remaining += g.remaining;   // unspent returns to parent
+    emit Revoked(node, g.epoch);
+}
+
+function isLive(bytes32 node) public view returns (bool) {
+    bytes32 cur = node;
+    for (uint256 i = 0; i < MAX_WALK; i++) {
+        if (cur == ROOT) return true;
+        Grant storage g = grants[cur];
+        if (g.epoch == 0) return false;
+        if (g.expiry < block.timestamp) return false;
+        if (g.parentEpochAtGrant != grants[g.parent].epoch) return false;
+        cur = g.parent;
+    }
+    revert("DEPTH_OVERFLOW");
+}
+```
+
+Bumping a parent's epoch invalidates every descendant in the same block, at any depth. `MAX_WALK` = 8; real depth is capped by `maxDepth` at 3–4.
+
+**Test:** grant a 3-level chain, revoke the root, assert every descendant returns `isLive == false` in the same block, and assert `revoke` gas is constant regardless of subtree size.
+
+---
+
+## 6. Executor — use-time enforcement
+
+ENS resolvers **store** records; they do not intercept transactions. Two enforcement points:
+
+| Point | Contract | Stops |
+|---|---|---|
+| Grant time | `AttenuatedSubregistry.register()` | An over-privileged name existing |
+| Use time | `Executor.execute()` | An action outside the resolved Grant |
+
+```solidity
+function execute(
+    bytes32 node,
+    uint8   capBit,
+    address target,
+    uint256 value,
+    bytes calldata data
+) external returns (bytes memory) {
+    Grant storage g = grants[node];
+
+    require(msg.sender == _resolveAddr(node), "NOT_AGENT");   // [UNVERIFIED] ENS addr
+    require(isLive(node), "REVOKED_OR_EXPIRED");
+    require(g.capabilities & (1 << capBit) != 0, "CAP_MISSING");
+    require(!g.readOnly || value == 0, "READONLY");
+    require(value <= g.remaining, "OVER_BUDGET");
+    require(target == capReg.allowedTarget(capBit), "TARGET_MISMATCH");
+    require(bytes4(data) == capReg.allowedSelector(capBit), "SELECTOR_MISMATCH");
+
+    g.remaining -= value;
+    (bool ok, bytes memory ret) = target.call{value: value}(data);
+    require(ok, "CALL_FAILED");
+    emit Executed(node, capBit, target, value);
+    return ret;
+}
+```
+
+---
+
+## 7. ENSv2 integration `[UNVERIFIED — verify all of this on day 1]`
+
+### Setup order — this is the step teams miss
+
+```
+1. register attenuate.eth on ENSv2 Sepolia
+2. deploy a subregistry              ← must exist before any subname
+3. set the subregistry on the parent
+4. deploy a PermissionedResolver
+5. only now can subnames be created
+```
+
+Use `ens-cli` to generate calldata. Do not hand-roll it.
+
+### Enhanced Access Control roles
+
+Do not use a single admin role.
+
+| Role | May | May not |
+|---|---|---|
+| `ROLE_GRANT` | Mint children within scope | Revoke |
+| `ROLE_REVOKE` | Bump epoch | Grant |
+| `ROLE_BUDGET` | Edit the budget record | Touch capabilities |
+| `ROLE_EXTEND` | Extend expiry up to parent's | Raise spendCap |
+
+### Records per agent name
+
+| Record | Value |
+|---|---|
+| `addr` | Executor address, so any wallet resolves the name |
+| `grant.caps` | Hex bitmask, text record |
+| `grant.cap` | spendCap, text record |
+| `grant.budget` | queryBudget, text record |
+| `grant.expiry` | Unix seconds, text record |
+| ENSIP-25 | ERC-8004 identity backlink |
+
+Text records must be readable by any ENS client with no SDK. Test this against an external ENS explorer.
+
+### Required features
+
+- **Wildcard resolution** — ephemeral agents resolve off the parent's resolver, zero gas per name. Use for short-lived `exec.*` grants.
+- **Non-transferable** — set on all agent names. A permission must not be sellable.
+- **Expiring** — `expiry` enforced both in the Grant and on the name.
+
+---
+
+## 8. Ledger Key Ring
+
+### Root mandate — EIP-712
+
+```
+RootMandate(
+  bytes32 rootNode,
+  uint256 capabilities,
+  uint256 spendCap,
+  uint256 queryBudget,
+  uint64  expiry,
+  uint16  maxDepth,
+  uint256 nonce
+)
+```
+
+```solidity
+function initRoot(RootMandate calldata m, bytes calldata sig) external {
+    require(nonces[m.rootNode]++ == m.nonce, "BAD_NONCE");
+    require(ECDSA.recover(_hashTypedData(m), sig) == deviceKey, "NOT_DEVICE");
+    grants[m.rootNode] = Grant({
+        capabilities: m.capabilities, spendCap: m.spendCap, queryBudget: m.queryBudget,
+        remaining: m.spendCap, expiry: m.expiry, maxDepth: m.maxDepth,
+        readOnly: false, parent: ROOT, parentEpochAtGrant: 0, epoch: 1
+    });
+}
+```
+
+### Three device touchpoints — all required
+
+1. **Root mandate** — one EIP-712 signature
+2. **Secret release** — every capability handed to a sub-agent is released from the Key Ring. The agent never receives a raw key. `broker/secrets.ts`.
+3. **Escalation** — an attempt to exceed scope surfaces as a device signature prompt, not a silent revert
+
+### Remote enrollment (`keyring-remote/`)
+
+The agent runs on a VPS with no USB port; the device is elsewhere. Build the enrollment and approval channel. If the Key Ring transport blocks this, fall back to a signed-approval relay and document the blocker in `FEEDBACK.md`.
+
+### FEEDBACK.md
+
+Write it continuously, not at the end. Every rough edge in the Key Ring CLI: what you ran, what you expected, what happened, version, OS.
+
+---
+
+## 9. The Graph
+
+### 9.1 Own subgraph (`subgraph/`)
+
+Index the permission tree itself.
+
+```graphql
+type Agent @entity {
+  id: ID!                    # namehash
+  name: String!              # ens name
+  parent: Agent
+  children: [Agent!]! @derivedFrom(field: "parent")
+  capabilities: BigInt!
+  spendCap: BigInt!
+  remaining: BigInt!
+  queryBudget: BigInt!
+  expiry: BigInt!
+  depth: Int!
+  epoch: BigInt!
+  revoked: Boolean!
+  createdAt: BigInt!
+}
+
+type Escalation @entity {
+  id: ID!
+  attemptedBy: Agent!
+  reason: String!            # SCOPE_WIDENED, CAP_EXCEEDS_UNALLOCATED, ...
+  blockNumber: BigInt!
+  timestamp: BigInt!
+}
+
+type BudgetFlow @entity {
+  id: ID!
+  from: Agent!
+  to: Agent
+  amount: BigInt!
+  kind: String!              # ALLOCATE | SPEND | RETURN
+  timestamp: BigInt!
+}
+```
+
+Handlers: `Granted`, `Revoked`, `Executed`, `EscalationBlocked`.
+
+**Fallback if day 4 slips:** ship a minimal schema indexing only `Granted` and `Revoked`. An indexed subgraph beats a perfect unindexed one.
+
+### 9.2 Substreams trigger (`indexer/`)
+
+gRPC subscription with cursor resumption and reorg handling. **Not polling.**
+
+- Persist the cursor; resume from it on restart
+- On `BlockUndoSignal`, roll back agent state to the last irreversible block and emit a reorg event to the UI
+- Rationale for the writeup: a guard five minutes late is a preference for an app that displays and a bug for one that spends
+
+### 9.3 x402 metered budget
+
+```
+agent → gated Graph endpoint
+     ← 402 Payment Required
+agent → pay from Grant.queryBudget (debited onchain)
+     ← data
+```
+
+The budget spent on data is the budget the device authorised. Same object. Debit `queryBudget` on the Grant, not a separate counter.
+
+### 9.4 MCP server (`mcp-server/`)
+
+Reusable infrastructure, not a wrapper around the demo. Any agent in any framework must be able to use it without seeing this project.
+
+Tools to expose: `grant_capability`, `revoke_agent`, `check_scope`, `query_position`, `get_delegation_tree`.
+
+Ship `SKILL.md` alongside.
+
+### 9.5 Benchmark
+
+Measure and publish:
+
+| Metric | Method |
+|---|---|
+| Trigger lag: Substreams vs polling | 100 blocks, both running in parallel |
+| Missed events | Liquidation-threshold crossings polling would have missed |
+| Reorg recovery time | Inject a reorg on a fork, measure state correction |
+
+---
+
+## 10. Agent (`agent/`)
+
+Loop:
+
+```
+1. Substreams push → position health changed
+2. Read position via Subgraph MCP (pay x402 from queryBudget)
+3. health > safe          → no action
+   health approaching     → delegate: mint risk.attenuate.eth (read-only, metered)
+   health critical        → delegate: mint exec.attenuate.eth (one cap, one target, minutes)
+   beyond mandate         → escalate to device
+4. Child executes via Executor, reports, parent revokes the child name
+```
+
+Sub-agents are separate processes with their own keys resolving to their own names. **They must not be function calls with names attached.** A judge will check this.
+
+---
+
+## 11. Test suite — these numbers get published
+
+`test/Escalation.t.sol` — all 12 must revert with the named reason:
+
+| # | Attack | Expected revert |
+|---|---|---|
+| 1 | Child sets a capability bit parent lacks | `SCOPE_WIDENED` |
+| 2 | Child spendCap > parent remaining | `CAP_EXCEEDS_UNALLOCATED` |
+| 3 | Child expiry beyond parent | `EXPIRY_EXTENDED` |
+| 4 | Grandchild re-adds a bit its parent dropped | `SCOPE_WIDENED` |
+| 5 | Child de-escalates readOnly | `READONLY_ESCALATION` |
+| 6 | Delegate past maxDepth | `DEPTH_EXCEEDED` |
+| 7 | Execute after root revoked | `REVOKED_OR_EXPIRED` |
+| 8 | Two children each granted the full parent budget | second reverts |
+| 9 | Non-agent address calls execute | `NOT_AGENT` |
+| 10 | Valid cap bit, wrong target | `TARGET_MISMATCH` |
+| 11 | Grant from an address without `ROLE_GRANT` | `NOT_GRANTOR` |
+| 12 | Grant under an already-revoked parent | `PARENT_DEAD` |
+
+Also record: max delegation depth, gas per grant, gas per revocation, root-to-leaf revocation latency.
+
+---
+
+## 12. Web (`web/`) — one screen, build last
+
+- **Center:** the tree. Nodes are **names, never hex addresses**. Each shows capability chips and a remaining-budget bar. States: alive (solid), working (pulse), rejected (red flash), dead (grey + struck through).
+- **Right rail:** transaction feed, every event with the tx hash linked to Sepolia Etherscan.
+- **Top:** one input — type a name, see its subtree.
+- **Bottom:** three buttons — Grant · Attempt Escalation · Revoke Root.
+- **Node detail:** link to resolve the name in an external ENS client.
+
+Drive everything off contract event subscriptions. Seed from chain state on load so a refresh does not reset the demo.
+
+**Excluded:** login, settings, wizards, charts, sidebar nav, dark-mode toggle, animations.
+
+Landing page is a separate, later task: one scroll, the claim in large type, static tree image, three guarantees, metrics table, prior-art paragraph, three buttons.
+
+---
+
+## 12b. Submission artifacts (required by ETHOnline rules)
+
+| File | Purpose |
+|---|---|
+| `SPEC.md` | This file. Required in-repo for spec-driven workflows. |
+| `prompts/` | Prompts and planning artifacts used to direct the AI. Required. |
+| `AI-USE.md` | Which files/directories were AI-assisted and how. Required. |
+| `FEEDBACK.md` | Ledger DX notes, written continuously. |
+| `SKILL.md` | In `mcp-server/`, published and usable standalone. |
+| `README.md` | Setup, architecture, metrics table, prior art, what is ours vs libraries. |
+
+## 13. Definition of done
+
+- [ ] Fuzz test on the attenuation invariant passes
+- [ ] All 12 escalation scenarios revert with the correct reason
+- [ ] Root revocation kills a 3-level tree in one transaction, constant gas
+- [ ] A real subname exists on ENSv2 Sepolia with Grant data in its resolver
+- [ ] That name's permissions are readable in an external ENS explorer
+- [ ] Wildcard resolution works for an ephemeral agent
+- [ ] Root mandate signed on a physical device or Speculos
+- [ ] Sub-agent receives a scoped capability, never a key
+- [ ] Remote enrollment works on a VPS with no USB port
+- [ ] Own subgraph deployed and indexing
+- [ ] Substreams trigger with cursor resumption and reorg handling
+- [ ] x402 debits `Grant.queryBudget`
+- [ ] MCP server usable standalone, `SKILL.md` published
+- [ ] Benchmark numbers recorded
+- [ ] Web tree renders live from chain events
+- [ ] `SPEC.md`, `prompts/`, `AI-USE.md` committed
+- [ ] Small frequent commits from all three people
+- [ ] Demo video: 2–4 min, ≥720p, human narration, no phone recording, no speed-up
+
+---
+
+## Reference
+
+- ENSv2 — https://docs.ens.domains/ensv2/overview
+- Enhanced Access Control — https://docs.ens.domains/ensv2/enhanced-access-control
+- Permissioned Resolver — https://docs.ens.domains/ensv2/permissioned-resolver
+- Permissioned Registry — https://docs.ens.domains/ensv2/permissioned-registry
+- `ens-cli` — https://github.com/ensdomains/ens-cli
+- Ledger ETHOnline — https://developers.ledger.com/ethonline
+- Subgraph MCP — https://thegraph.com/docs/en/subgraphs/tooling/subgraph-mcp/introduction/
+- Subgraph SKILLs — https://github.com/graphprotocol/subgraphs-skills

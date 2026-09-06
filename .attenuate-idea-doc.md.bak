@@ -1,0 +1,658 @@
+# Attenuate
+
+**An AI agent that manages your onchain position, and the permission layer that makes it safe to hand it real money.**
+
+ETHOnline 2026 · Classic "From Scratch" track · 3 people
+Tracks: Ledger · ENS · The Graph
+
+> ## ⏰ SUBMISSION DEADLINE: Sunday 13 September 2026, 12:00 pm EDT
+> **= 9:30 pm IST, Sunday 13 September.** Late submissions are not accepted.
+> The event runs to Sep 16, but that is judging. Building stops on the 13th.
+> Set an internal freeze at **9:30 am IST on Sep 13** — twelve hours early.
+
+---
+
+## The pitch
+
+The product is an agent that watches your lending position on live Graph data and acts before you get liquidated.
+
+Plenty of people have built that agent. Almost nobody would give it real money, because the moment it holds a key it holds everything, and if it delegates work to a sub-agent that authority leaks further.
+
+So we built the reason you can trust it. The root key never leaves a Ledger Key Ring. You sign one mandate on device saying how much the agent may spend and where. Every agent under it is an ENSv2 subname whose scope, budget and expiry live in its own Permissioned Resolver, and attenuation is enforced in the contract: a child's scope must be a subset of its parent's, or the name cannot be minted at all. Revoke a parent name and the entire subtree dies in the same block.
+
+**One-liner:** An agent you can actually fund, because a name is a permission and a child name can never hold more power than its parent.
+
+**Framing discipline:** lead with the agent, not the permission system. "We built a permission system" makes people ask who wants it. "We built an agent that manages your money, and here's why you can let it" answers that question before it's asked. The security layer is the reason the product is allowed to exist, not the product.
+
+---
+
+## The problem
+
+**The surface problem:** an agent that manages money needs a key, and a key is all-or-nothing. People run these agents with a private key in a `.env` file, or they don't run them at all. Most choose not to, and their capital sits idle.
+
+**The structural problem underneath:** the moment that agent delegates to a sub-agent, authority leaks at every hop.
+
+The Cloud Security Alliance documented in March 2026 that each agent in a delegation chain should have narrower permissions than the one before it, but that this least-privilege principle routinely fails in practice. They also noted that traditional OAuth tokens cannot be restricted after issuance without recontacting the auth server, which breaks in decentralised systems.
+
+Two concrete failures:
+
+- **Scope creep on delegation.** A research sub-agent inherits the financial agent's spending tools and executes a trade nobody authorised.
+- **No kill switch.** Once a token is issued you wait for expiry. There is no instant revocation.
+
+---
+
+## What the agent actually does
+
+This is the part that gives the project a protagonist. Without it, the demo is a contract saying no.
+
+`attenuate.eth` monitors a lending position. It subscribes to a Substreams gRPC feed and reads position health, collateral prices and liquidation thresholds through the Subgraph MCP. When health drops toward the liquidation threshold it acts — repays a portion of the debt, or adds collateral — inside the budget the device authorised.
+
+For heavier analysis it delegates. `risk.attenuate.eth` gets a read-only grant with a metered query budget to evaluate the position across protocols. `exec.attenuate.eth` gets a narrow spend grant covering exactly one action on one protocol, expiring in minutes.
+
+Neither can exceed the parent. The parent cannot exceed the device mandate. That chain is the whole point.
+
+---
+
+## The mechanism
+
+Every agent is an ENSv2 name. Its scope, budget and expiry live in its own Permissioned Resolver.
+
+### Three guarantees
+
+**1. Attenuation is structural.**
+`AttenuatedSubregistry.register()` refuses to mint a subname whose Grant is not a subset of its parent's. Not a backend check — an over-privileged name cannot come into existence.
+
+**2. The root is hardware.**
+Top-level authority lives in the Ledger Key Ring (`wallet-cli ring`). A human signs one EIP-712 root mandate on device. Nothing anywhere in the tree can exceed it.
+
+**3. Revocation is instant and total.**
+Each node stores an epoch. Children record their parent's epoch at grant time. Bumping a parent's epoch — one SSTORE — kills every descendant in the same block, at any depth.
+
+### Flow
+
+```
+you --(EIP-712 RootMandate signed on Ledger)--> attenuate.eth
+                                                     |
+                        +----------------------------+----------------------------+
+                        |                                                         |
+                 risk.attenuate.eth                                       exec.attenuate.eth
+                 read-only, metered queries                               one action, one protocol
+                 caps ⊆ parent                                            caps ⊆ parent
+                 spendCap ≤ parent.remaining                              spendCap ≤ parent.remaining
+                 expiry ≤ parent                                          expiry ≤ parent
+```
+
+Revoke `attenuate.eth` → both children dead in the same block.
+
+---
+
+## Technical spec
+
+### Data model
+
+Permissions are bitmasks, not JSON. The attenuation check becomes one opcode.
+
+```
+// CapabilityRegistry: bit index → meaning
+// bit 0: swap.uniswap       bit 3: erc20.approve
+// bit 1: lend.aave.supply   bit 4: data.graph.read
+// bit 2: lend.aave.withdraw bit 5: transfer.native
+
+struct Grant {
+    uint256 capabilities;       // bitmask
+    uint256 spendCap;           // wei ceiling
+    uint256 queryBudget;        // x402 units
+    uint256 remaining;          // unallocated portion
+    uint64  expiry;
+    uint16  maxDepth;
+    bool    readOnly;
+    bytes32 parent;
+    uint64  parentEpochAtGrant;
+    uint64  epoch;
+}
+mapping(bytes32 => Grant) public grants;   // namehash → Grant
+```
+
+### The attenuation invariant
+
+```solidity
+function _assertAttenuated(Grant memory p, Grant memory c) internal pure {
+    require(c.capabilities & p.capabilities == c.capabilities, "SCOPE_WIDENED");
+    require(c.spendCap    <= p.remaining, "CAP_EXCEEDS_UNALLOCATED");
+    require(c.queryBudget <= p.queryBudget, "BUDGET_WIDENED");
+    require(c.expiry      <= p.expiry,    "EXPIRY_EXTENDED");
+    require(c.maxDepth     < p.maxDepth,  "DEPTH_EXCEEDED");
+    require(!p.readOnly || c.readOnly,    "READONLY_ESCALATION");
+}
+```
+
+`c & p == c` is the subset test. Any bit the child sets that the parent lacks is dropped by the AND, equality fails, revert.
+
+Note `p.remaining`, not `p.spendCap`. Otherwise a parent holding 100 grants 100 to two children.
+
+### Allocation-based budgets
+
+At grant time the parent's spendable drops immediately:
+
+```
+p.remaining -= childGrant.spendCap;
+child.remaining = childGrant.spendCap;
+```
+
+Conservation holds by construction — the whole tree can never exceed what the device approved. Unspent budget returns to the parent on revocation.
+
+### Epoch revocation — O(1) subtree kill
+
+```solidity
+function revoke(bytes32 node) external {
+    require(_hasRole(msg.sender, node, ROLE_REVOKE), "NOT_REVOKER");
+    grants[node].epoch++;                            // one store
+    grants[grants[node].parent].remaining += grants[node].remaining;
+    emit Revoked(node);
+}
+
+function isLive(bytes32 node) public view returns (bool) {
+    bytes32 cur = node;
+    while (cur != ROOT) {
+        Grant storage g = grants[cur];
+        if (g.expiry < block.timestamp) return false;
+        if (g.parentEpochAtGrant != grants[g.parent].epoch) return false;
+        cur = g.parent;
+    }
+    return grants[ROOT].expiry >= block.timestamp;
+}
+```
+
+Validation is O(depth), and depth is capped by `maxDepth` at 3 or 4.
+
+### Two enforcement points — state this precisely
+
+ENS resolvers **store** records; they do not intercept transactions. A judge will probe this.
+
+| Point | Contract | Stops |
+|---|---|---|
+| Grant time | `AttenuatedSubregistry.register()` | An over-privileged name from existing |
+| Use time | `Executor.execute()` | An action outside the resolved Grant |
+
+**Claim:** the naming layer refuses to mint escalation; the executor trusts what ENS resolved. Accurate and still novel. Do not claim ENS blocks execution.
+
+### Ledger root of trust
+
+```
+RootMandate(bytes32 rootNode, uint256 capabilities, uint256 spendCap,
+            uint256 queryBudget, uint64 expiry, uint16 maxDepth, uint256 nonce)
+```
+
+EIP-712 typed data, which is what the device renders legibly. Signed once, submitted to the root registry, everything below derives from it.
+
+**Three device touchpoints** — this is what makes Ledger central rather than decorative:
+1. Root mandate signature
+2. Every secret released to a hire (broker releases from Key Ring, never the raw key)
+3. Escalation attempts surface as a signature request, not a silent revert
+
+---
+
+## Architecture
+
+```
+                    ┌──────────────────────────────────┐
+                    │  HUMAN — Ledger (wallet-cli ring)│
+                    └───────────────┬──────────────────┘
+                                    │ EIP-712 RootMandate
+                                    ▼
+┌───────────────────────────────────────────────────────────────────┐
+│  ROOT — attenuate.eth (ENSv2, Sepolia)                            │
+└───────────────┬───────────────────────────────────────────────────┘
+                │ register() → _assertAttenuated()
+                ▼
+┌───────────────────────────────────────────────────────────────────┐
+│  AttenuatedSubregistry.sol — refuses non-subset children          │
+└───────────────┬───────────────────────────────────────────────────┘
+      ┌─────────┴──────────┐
+      ▼                    ▼
+ risk.attenuate.eth    exec.attenuate.eth
+ PermissionedResolver  PermissionedResolver
+      └─────────┬──────────┘
+                ▼
+┌───────────────────────────────────────────────────────────────────┐
+│  Executor.sol — resolve → isLive() → bitmask check → run          │
+└───────────────────────────────────────────────────────────────────┘
+
+  ── data + budget plane ──
+  Substreams gRPC ──► trigger daemon ──► agent wakes
+  Subgraph MCP ◄── 402 → pay → retry ── debited from Grant.queryBudget
+```
+
+---
+
+## Stack
+
+| Layer | Choice | Why |
+|---|---|---|
+| Contracts | Solidity 0.8.26, Foundry | Fuzz tests on the attenuation invariant |
+| Chain | Sepolia | ENSv2 beta is Sepolia-only |
+| Naming | ENSv2 — hierarchical registries, EAC, Permissioned Resolvers | Required by the ENS track |
+| ENS tooling | `ens-cli` | Handles subregistry deploy/set calldata. Don't hand-roll |
+| Hardware root | Ledger Key Ring CLI (`wallet-cli ring`) | Mandatory for Ledger eligibility |
+| Signing | EIP-712 | What the device renders legibly |
+| Agent runtime | TypeScript, Node 20 | Matches Graph and Ledger tooling |
+| Data | Subgraph MCP + Subgraph Studio key | Live data required, mocks disqualify |
+| Triggers | Substreams gRPC subscription | Polling is a bug when the guard spends money |
+| Payments | x402 | Budget unit; both Graph and Ledger name it |
+| Distribution | MCP server + `SKILL.md` | Graph rewards reusable infra over apps |
+| Web | Next.js + viem + force-directed tree | One screen only |
+
+**Deliberately excluded:** no ERC-4337, no ERC-7710, no database, no auth service. Every one of those is a layer competing projects used and we replace.
+
+---
+
+## Track mapping
+
+**Fit and odds are different things.** All three tracks below are now bullseyes on *fit* — every stated requirement is met structurally, not decoratively. Odds still differ, because field size differs:
+
+| Track | Fit | Slots | Field | Realistic odds |
+|---|---|---|---|---|
+| ENS | bullseye | 4 | thin — ENSv2 is beta on Sepolia, most teams fall back to v1 and become ineligible | best |
+| Ledger | bullseye | 3 | thin — strict Key Ring requirement suppresses entries | strong |
+| The Graph | bullseye | 3 | crowded — every AI team queries data | competitive, not favourite |
+
+Do not read "crowded" as "skip it." Read it as: meet every requirement and let the field sort itself out.
+
+### Ledger — AI Agents x Ledger — $3,500 (2000 / 1000 / 500) — **bullseye**
+
+Their track text: *"a broker hands out scoped capabilities, never the API key."* That is exactly what the parent agent does.
+
+**Hard requirement:** built on the Ledger Agent Stack, specifically `wallet-cli ring`. No Key Ring, no eligibility. Verify the device or Speculos path on day 1.
+
+**Build both of their stated asks, not just the first.**
+
+| Their ask | Our answer |
+|---|---|
+| A broker hands out scoped capabilities, never the API key | `AttenuatedSubregistry` + broker. Sub-agents receive grants, never keys. |
+| Key Ring on hosts with no USB port — VPS, CI runner, hosted agent | Remote enrollment. Agent runs on a VPS, device sits on a desk elsewhere. |
+| Agents that pay for what they use, x402-style | Query budget denominated in x402 pay-per-query, drawn from the device mandate. |
+| Human-in-the-loop for irreversible actions | Escalation surfaces as a device signature prompt, not a silent revert. |
+
+The second row is the uncontested ground. Nobody builds the plumbing. We need it anyway because the agent runs on a server and the device does not.
+
+**Three device touchpoints, not one.** A device that signs once at the start and disappears reads as decorative. The device must be in the loop continuously:
+
+1. Root mandate signature (EIP-712)
+2. Every secret released to a sub-agent — through the Key Ring, never a raw key
+3. Every escalation attempt — surfaces as a signature prompt
+
+**The counterfactual shot.** On camera, run the same escalation twice: once with the device connected, once without. The second hangs. Five seconds, and it answers the only question a Ledger judge really has — is the hardware load-bearing or is it branding.
+
+**Write a real `FEEDBACK.md`.** They judge developer experience alongside code and almost nobody does this properly. Every rough edge in the Key Ring CLI, with reproduction steps and the version. An hour of work, disproportionate weight.
+
+### ENS — Best Use of ENSv2 — $4,500 (1500 / 1500 / 1000 / 500 runner-up) — **bullseye**
+
+| Feature | Used as | Status |
+|---|---|---|
+| Hierarchical registries | The delegation chain | core |
+| Own subname registry | Where attenuation is enforced | core |
+| Enhanced Access Control | Split roles, see below | core |
+| Permissioned Resolvers | Per-agent Grant storage | core |
+| Expiring / revocable | Epoch revocation | core |
+| **Non-transferable** | A permission must not be sellable | add |
+| **Wildcard resolution** | Ephemeral agents at zero gas per name | add |
+| Record aliasing | Optional cheap win | optional |
+
+**Split the EAC roles properly** — one admin role is a wasted opportunity:
+
+| Role | May |
+|---|---|
+| `ROLE_GRANT` | Mint children within scope |
+| `ROLE_REVOKE` | Bump epoch, cannot grant |
+| `ROLE_BUDGET` | Edit budget record only, not capabilities |
+| `ROLE_EXTEND` | Extend expiry up to parent's, cannot raise cap |
+
+**Records per agent name:**
+- `addr` → executor address, so any wallet resolves it
+- `grant.caps`, `grant.cap`, `grant.expiry` → text records readable by any ENS client with no SDK
+- ENSIP-25 record → ERC-8004 identity backlink
+
+**The credibility moment:** paste `risk.attenuate.eth` into an external ENS explorer and show its permissions readable by a tool you didn't write.
+
+**Hard requirements:** ENSv2 on **Sepolia**. Central, not cosmetic. Functional demo, no hard-coded values. Video and/or live demo. Open source.
+
+**The sentence to say:** ENSv1 could store agent policy. ENSv2 can enforce it, because hierarchical registries and Enhanced Access Control let the naming layer itself refuse to mint an over-privileged child.
+
+### The Graph — Best AI Tooling or AI Use Case (From Scratch) — $5,000 (2500 / 1500 / 1000) — **bullseye on fit**
+
+The previous version of this doc called this leg "solid, not bullseye." That was correct when the data was only an input. With the five additions below it is no longer an input — we contribute to the ecosystem, not just consume it.
+
+**Read the profile of their Lisbon winners and match it exactly.** Their winners composed standardized subgraphs, drove triggers off a Substreams gRPC subscription, paid per query with x402, and open-sourced an MCP server with a `SKILL.md`. That is a checklist. Tick every box.
+
+**1. Deploy our own subgraph.** The biggest single upgrade. Index the permission tree itself — grants, revocations, budget flows, escalation attempts, delegation depth. Anyone can now query the full delegation history of any agent. This moves us from client of the ecosystem to contributor to it.
+
+**2. Ship the MCP server as a real deliverable, not a wrapper.** Published, documented, with a `SKILL.md`. Any agent in any framework can delegate under enforced budgets against Graph data, without ever seeing our demo. Their track rewards reusable infrastructure over a single end-user app.
+
+**3. Substreams gRPC with cursor resumption and reorg handling.** Not polling. And say the reason out loud in the submission: *a guard five minutes late is a preference for an app that displays and a bug for one that spends.*
+
+**4. Handle reorgs visibly.** If a reorg reverses the block the agent acted on, show what happens. Almost nobody does this, and data-infrastructure judges care about exactly this kind of correctness.
+
+**5. Bring a measurement.** Their Best AI Tooling winner took the prize on a number — a 30x token reduction measured across 30 live subgraphs. Ours: trigger lag on Substreams versus subgraph polling, measured across 100 blocks, with the count of liquidation events that polling would have missed.
+
+Plus what was already there: live data through Subgraph MCP with a real Studio API key, and x402 pay-per-query as the budget unit, so the allowance and the data spend are the same object.
+
+**Hard requirements:** live data from a Graph provider. Mocked, local-only or static datasets are an automatic disqualification. Select the **Start Fresh** pool, not Continuity. Demo video 2–4 minutes.
+
+---
+
+## Prior art and positioning
+
+Do not claim novelty of concept. Claim novelty of mechanism.
+
+| Project | What it did | Why we differ |
+|---|---|---|
+| ENSFirewall (Open Agents) | Policies in ENS text records, enforced by ERC-4337 smart accounts | Policy in ENS, enforcement elsewhere. We put both in the naming layer. ENSv1. |
+| WorkAgnt DelegateFlow (MetaMask) | Sub-agent delegation via ERC-7710, x402 payments | Token-based. We delete the token layer. |
+| ACN | Agent subnames with skills/reputation, job board | Identity and discovery, no attenuation. ENSv1. |
+| HumanENS | Agent subnames under a verified human, ENSIP-25 backlinks | Provenance, not permission. ENSv1. |
+| AgentArena | Subname as agent registry, config in text records | Registry only. ENSv1. |
+| AWS sample-agentic-delegation | Cedar attenuation, chain-hash tamper detection | Correct pattern, entirely offchain. |
+
+**Say it this way:** every prior project in this space was built on ENSv1 primitives that could store policy but could not enforce it. Do **not** say the ENSv2 requirement "disqualifies" those teams — it disqualifies their existing submissions, not the teams, and someone could rebuild this week.
+
+**Submission line:** "Storing agent policy in ENS has been done. Enforcing attenuation in the registry hierarchy itself has not."
+
+---
+
+## Language discipline
+
+Judges have seen too many swarm projects.
+
+- ❌ orchestrator, swarm, specialists, "agent hires other agents", multi-agent system
+- ✅ attenuation, scope, delegation chain, revocation, permission tree, security primitive
+
+Same code. Different reception.
+
+Pick one root name and use it everywhere: **`attenuate.eth`**.
+
+---
+
+## The web view — one screen
+
+Person C, day 5, half a day. If it takes longer, cut features, not the red flash.
+
+- **Center: the tree.** Nodes are names, never addresses. Each shows capability chips and a remaining-budget bar. Node states: alive (solid), working (pulse), rejected (red flash), dead (greyed + struck through).
+- **Right rail: transaction feed.** Every contract event with the tx hash linked to Sepolia Etherscan. This is proof-of-realness against a suspected mock.
+- **Top: one input.** Type a name, see its subtree.
+- **Bottom: three buttons.** Grant · Attempt Escalation · Revoke Root.
+- **Node detail:** link to resolve the name in an external ENS client.
+
+**Excluded:** login, settings, agent-creation wizard, charts, sidebar nav, dark-mode toggle.
+
+**Never show a hex address anywhere.** Names only. The interface should argue ENS's case for them.
+
+### Landing page — day 6 only, after the demo works
+
+Single scroll: the claim in large type, a static tree image, three lines for the three guarantees, the metrics table, the two-sentence prior-art paragraph, and three buttons (Launch demo · GitHub · Video). No animations, no features grid, no roadmap, no team section. Host it at the ENS name so the page itself resolves through the thing you built.
+
+---
+
+## Demo script — 90 seconds
+
+Open with the **block**, not the tree forming.
+
+| Time | Beat |
+|---|---|
+| 0:00–0:20 | A sub-agent attempts an action outside its scope. Contract refuses. Red flash, revert reason `SCOPE_WIDENED` on screen. |
+| 0:20–0:45 | Root mandate approved on the physical Ledger. Tree forms: subregistries deployed, subnames minted with visibly narrowing scope. |
+| 0:45–1:10 | The agent detects liquidation risk from live Graph data and acts inside its budget, paying for its own queries via x402. Real money, real position. |
+| 1:10–1:30 | Revoke the root from a second terminal. Entire subtree greys out mid-execution, one transaction. |
+
+Split-screen: tree on the left, real transactions scrolling on the right, physical device on camera.
+
+---
+
+## Metrics to publish
+
+The Lisbon Best AI Tooling winner won on a measurement (30x token reduction across 30 live subgraphs). Bring a table nobody else brings.
+
+Test suite = the metrics. Foundry fuzz on the invariant, plus 12 named escalation scenarios:
+
+| # | Attack | Expected |
+|---|---|---|
+| 1 | Child sets capability bit parent lacks | `SCOPE_WIDENED` |
+| 2 | Child spendCap > parent remaining | `CAP_EXCEEDS_UNALLOCATED` |
+| 3 | Child expiry beyond parent | `EXPIRY_EXTENDED` |
+| 4 | Grandchild re-adds a bit parent dropped | `SCOPE_WIDENED` |
+| 5 | Child de-escalates readOnly | `READONLY_ESCALATION` |
+| 6 | Delegate past maxDepth | `DEPTH_EXCEEDED` |
+| 7 | Execute after root revoked | `REVOKED_OR_EXPIRED` |
+| 8 | Two children each granted full parent budget | second reverts |
+| 9 | Non-agent calls execute | `NOT_AGENT` |
+| 10 | Capability bit valid, target wrong | `TARGET_MISMATCH` |
+| 11 | Grant from address without `ROLE_GRANT` | `NOT_GRANTOR` |
+| 12 | Grant under a revoked parent | `PARENT_DEAD` |
+
+Also publish: max delegation depth, gas per grant, gas per revocation, root-to-leaf revocation latency, Substreams trigger lag vs polling.
+
+---
+
+## Repo
+
+```
+contracts/
+  AttenuatedSubregistry.sol   ← core, ~200 lines
+  Executor.sol
+  CapabilityRegistry.sol
+  test/Attenuation.t.sol      ← fuzz the invariant
+broker/
+  keyring.ts                  ← wallet-cli ring wrapper
+  mandate.ts                  ← EIP-712 signing
+  grant.ts
+mcp-server/
+  index.ts
+  SKILL.md
+subgraph/
+  schema.graphql             ← indexes the permission tree itself
+  subgraph.yaml
+  src/mapping.ts             ← Granted, Revoked, Escalated, BudgetSpent
+indexer/
+  substreams-trigger.ts      ← gRPC subscription, cursor resumption, reorg handling
+keyring-remote/
+  enroll.ts                  ← Key Ring on a VPS with no USB port
+web/
+  tree.tsx                    ← one screen
+  landing.tsx                 ← day 6
+FEEDBACK.md                   ← Ledger DX, they weight it
+```
+
+---
+
+## Effort weighting
+
+| Component | Effort | Why |
+|---|---|---|
+| `AttenuatedSubregistry.sol` | 20% | The entire innovation |
+| ENSv2 depth — incl. wildcard, split EAC, non-transferable | 20% | Best odds of any track; extra hours convert directly to placement |
+| Ledger Key Ring + EIP-712 + **remote enrollment** | 20% | Hard eligibility gate, and remote enrollment is uncontested ground |
+| Graph — **own subgraph**, MCP server, x402, Substreams, reorgs | 20% | Raised from 15%. This is what turns the leg from solid to bullseye |
+| Executor + agent runtime | 10% | Straightforward once Grants exist |
+| Demo, video, docs, metrics | 10% | Async judging — don't leave to the last day |
+
+---
+
+## Six-day plan — deadline Sun 13 Sep, 12:00 pm EDT / 9:30 pm IST
+
+| Day | Date | Focus |
+|---|---|---|
+| 1 | Mon 8 Sep | **Unblock first.** Pull live ENSv2 ABIs. Deploy a subregistry on Sepolia by hand, mint one subname, write one resolver record. Verify Ledger device or Speculos signs. Get Subgraph Studio API key. **No feature code today.** |
+| 2 | Tue 9 Sep | Attenuation contract + fuzz test green. All 12 escalation scenarios reverting correctly. |
+| 3 | Wed 10 Sep | Ledger root mandate → first real grant, device in the loop. Start remote Key Ring enrollment. ENS depth pass: wildcard, split EAC roles, non-transferable. |
+| 4 | Thu 11 Sep | Graph: deploy own subgraph, Subgraph MCP, x402 metered budget, Substreams trigger with reorg handling. |
+| 5 | Fri 12 Sep | **Feature freeze at end of day.** Wire the full path. Web tree. Run escalation suite + Substreams-vs-polling benchmark, record all numbers. Record the demo video. |
+| 6 | Sat 13 Sep → Sun 14 Sep 9:30am IST | README, AI-USE.md, FEEDBACK.md, SKILL.md, landing page, three partner-prize write-ups. **Submit by 9:30 am IST Sunday, not 9:30 pm.** |
+
+**Sunday morning submit, not Sunday night.** The dashboard slows in the final hours and a failed video upload at minute 58 loses everything.
+
+| Person | Owns | Days 1–2 | Days 3–4 | Days 5–6 |
+|---|---|---|---|---|
+| A (strongest) | Contracts | Attenuation + fuzz + escalation suite | Executor, epoch revocation | Metrics, gas numbers |
+| B | ENS + Ledger | ABIs, subregistry deploy, Key Ring, Speculos check | Root mandate, remote enrollment, ENS depth pass | FEEDBACK.md, ENS + Ledger write-ups |
+| C | Graph + agent | API key, MCP wiring | Own subgraph, x402, Substreams + reorgs | Benchmark, SKILL.md, web tree, video, landing |
+
+One shared repo. **Commit daily, small commits.** Submissions with large single commits or missing history may be disqualified.
+
+---
+
+## ETHOnline rules compliance
+
+Every rule from the official details page, and what we do about it.
+
+### AI tools — read this carefully, it affects us directly
+
+AI tools are permitted, with three conditions:
+
+**Attribution.** Document in the submission where and how AI tools were used — which parts of the code, which specific files, which assets. → Ship an **`AI-USE.md`** listing this per directory. Not optional.
+
+**Involvement.** AI should assist development, not create the entire project. Submissions relying entirely on AI without meaningful team contribution may not be eligible for partner prizes or finalist consideration. → Every person must have real authored commits. Do not let one person Claude-Code the whole repo.
+
+**Spec-driven development.** Permitted, but if you use it you must include all spec files, prompts and planning artifacts in the submission repo. Judges need to see how you directed the AI, not just the output. → **Commit `SPEC.md` and a `prompts/` directory to the repo.** This is a requirement, not a nice-to-have. Our spec-driven workflow becomes an asset once it is visible.
+
+### Start Fresh (Classic Track)
+
+All work must begin after the hackathon started. No prior project-specific code, designs or assets except public libraries and starter kits. Projects built before the event can participate but are **not eligible for partner prizes or the Finalist category**.
+
+→ Nothing predates Sep 4. Public libraries are fine; declare them.
+
+### Version control
+
+Large single commits or missing history may be disqualified. → Small, frequent, daily commits from all three people.
+
+### Include everything
+
+GitHub repo or equivalent proving the work was done during the hackathon. Clearly distinguish new work from reused. → README section separating our code from libraries.
+
+### Partner prize submission
+
+Up to 3 partner prizes. If a partner has multiple tracks you are eligible for all of them while it counts as one selection. **For each partner prize you must explain how you used or integrated their tools, provide feedback, and share comments.** This is the only way partners assess the project.
+
+→ Write three separate write-ups in advance, not in the final hour:
+- **Ledger** — Key Ring integration, remote enrollment, three device touchpoints, DX feedback
+- **ENS** — every ENSv2 feature used and why, plus beta feedback and any issues filed
+- **The Graph** — own subgraph, MCP server, Substreams, x402, benchmark numbers
+
+### Judging criteria — five categories
+
+| Criterion | Our answer |
+|---|---|
+| **Technicality** | Onchain attenuation invariant, O(1) epoch subtree revocation, allocation-based budget conservation |
+| **Originality** | Prior work stored agent policy in ENS; enforcing attenuation in the registry hierarchy is new |
+| **Practicality** | Working agent managing a real position on Sepolia, usable today |
+| **Usability (UI/UX/DX)** | One-screen tree, names never hex addresses, MCP server usable standalone, `SKILL.md` |
+| **WOW Factor** | Revoke one name, an entire subtree dies mid-execution in a single transaction |
+
+**Usability includes DX.** The MCP server and SKILL.md are scored here, not just as a Graph deliverable.
+
+### Async judging structure
+
+Two rounds. Round one is asynchronous and screens projects; typically only the top 20% advance to live judging. Round one has **no impact on partner prize eligibility** and partners do not see those results. At most async events the majority of prizes go to projects that do **not** advance.
+
+→ Optimise for partner prizes. Finalist is upside, not the plan.
+
+### If we opt into Finalist judging
+
+7 minutes total: **4 minutes demo, 3 minutes Q&A.** Prepare answers for: what inspired the project, what tools we used and why, what challenges we solved and how.
+
+---
+
+## Demo video — hard technical rules
+
+Between 2 and 4 minutes. Uploads outside that range are automatically rejected.
+
+**Automatic re-submission triggers — any one of these and we are asked to redo it:**
+
+| ❌ Do not | Note |
+|---|---|
+| Export below 720p | Upload fails outright |
+| Exceed 4 minutes | Upload fails outright |
+| Speed up the video to fit | — |
+| Use music + on-screen text instead of talking | — |
+| Record on a mobile phone | — |
+| Use text-to-speech or an AI voiceover | **A human must narrate** |
+
+**Also:** keep the intro under 20 seconds, speak slowly, avoid background noise and echo, edit out waiting time, and no more than 4 bullet points per slide.
+
+### Video plan — 3:30 target
+
+| Time | Beat |
+|---|---|
+| 0:00–0:20 | The problem, spoken. Under 20 seconds. |
+| 0:20–0:50 | **Lead with the block.** Sub-agent attempts to exceed scope, contract refuses, `SCOPE_WIDENED` on screen. |
+| 0:50–1:30 | Root mandate signed on the physical device. Tree forms, scope visibly narrowing. |
+| 1:30–2:10 | Agent detects liquidation risk from live Graph data and acts inside budget, paying x402 for its own queries. |
+| 2:10–2:40 | Device counterfactual: same escalation with the device unplugged. It hangs. |
+| 2:40–3:10 | Revoke the root. Entire subtree dies mid-execution, one transaction. |
+| 3:10–3:30 | Metrics table on screen: 12/12 blocked, gas, revocation latency, Substreams vs polling. |
+
+Cut the waiting. Edit out every pending transaction.
+
+---
+
+## Risks
+
+| Risk | Mitigation |
+|---|---|
+| **Theatre delegation** — sub-agents are function calls with names attached | Permissions must be read from the resolver and enforced in-contract. This is the one thing that loses all three tracks. |
+| No physical Ledger device | Verify Speculos/emulator path on day 1. If it fails, Ledger is dead and Hedera replaces it. |
+| ENSv2 subregistry friction | Subregistry must be deployed and set before any subname exists. Use `ens-cli`, don't hand-roll calldata. |
+| Graph leg stays generic | The x402 budget link is mandatory, not optional. Without it this track is lost. |
+| Scope creep | Feature freeze end of Fri 12 Sep. A shipped 7.5 beats an unbuilt 9. |
+| **Wrong deadline in someone's head** | It is **Sep 13, not Sep 16**. Sep 16 is when judging ends. Tell all three people today. |
+| **AI attribution missing** | Submissions relying entirely on AI may be ineligible for partner prizes. `AI-USE.md` + committed `SPEC.md` and `prompts/` + real authored commits from each person. |
+| **Video rejected on a technicality** | 720p minimum, under 4:00, human voice, not phone-recorded. Any one of these forces a re-submission. Record Friday, not Sunday. |
+| Own subgraph slips | Deploy a minimal schema on day 4 indexing only Granted and Revoked. Extend later. An indexed subgraph beats a perfect unindexed one. |
+| Remote enrollment blocked by Key Ring transport | Fall back to a signed-approval relay and document the blocker in FEEDBACK.md. A documented failure still scores on DX. |
+| Landing page eats a day | Day 6 only, after the demo works. It is the most fun thing to build and the least scored. |
+
+---
+
+## Submission checklist
+
+**Deadline: Sun 13 Sep 2026, 12:00 pm EDT = 9:30 pm IST. Submit by 9:30 am IST.**
+
+- [ ] Public GitHub repo, open source, clear README
+- [ ] `AI-USE.md` — where and how AI tools were used, per file/directory (**required**)
+- [ ] `SPEC.md` and `prompts/` committed to the repo (**required for spec-driven workflows**)
+- [ ] Small, frequent commits from all three people — no single large dump
+- [ ] README distinguishes our work from libraries and starter kits
+- [ ] Demo video 2–4 minutes, **720p or higher**, human narration, not phone-recorded, not sped up
+- [ ] Three partner write-ups drafted in advance: integration explanation + feedback + comments, one per partner
+- [ ] Built on `wallet-cli ring` (Ledger)
+- [ ] Remote Key Ring enrollment working on a VPS with no USB port (Ledger — their second ask)
+- [ ] Three device touchpoints, not one (Ledger)
+- [ ] Device counterfactual shot in the video — same escalation with and without the device
+- [ ] ENSv2 on Sepolia, no hard-coded values (ENS)
+- [ ] Wildcard resolution + non-transferable flags + split EAC roles (ENS)
+- [ ] Name resolves in an external ENS client, on camera (ENS)
+- [ ] Own subgraph deployed and indexing the permission tree (Graph)
+- [ ] Substreams gRPC with cursor resumption and reorg handling (Graph)
+- [ ] Substreams-vs-polling benchmark with missed-event count (Graph)
+- [ ] Live Graph data with real API key, **Start Fresh** pool (Graph)
+- [ ] `FEEDBACK.md` for Ledger DX
+- [ ] `SKILL.md` for the MCP server, published and usable standalone
+- [ ] Metrics table in README and on the landing page
+- [ ] Prior-art paragraph naming ENSFirewall and WorkAgnt honestly
+- [ ] Three partner prizes selected on the ETHGlobal platform
+
+---
+
+## Reference links
+
+- ENSv2 overview — https://docs.ens.domains/ensv2/overview
+- Enhanced Access Control — https://docs.ens.domains/ensv2/enhanced-access-control
+- Permissioned Resolver — https://docs.ens.domains/ensv2/permissioned-resolver
+- Permissioned Registry — https://docs.ens.domains/ensv2/permissioned-registry
+- ENS agent-native CLI — https://github.com/ensdomains/ens-cli
+- Ledger ETHOnline track — https://developers.ledger.com/ethonline
+- Subgraph MCP — https://thegraph.com/docs/en/subgraphs/tooling/subgraph-mcp/introduction/
+- Subgraph SKILLs — https://github.com/graphprotocol/subgraphs-skills
+- ETHOnline prizes — https://ethglobal.com/events/ethonline2026/prizes
+
+---
+
+**Verify on day 1:** exact ENSv2 interfaces for subregistry deploy/set and Permissioned Resolver writes. Check `docs.ens.domains/ensv2` and `ens-cli` directly — the contracts are three months old, don't trust any spec over their docs.
