@@ -27,6 +27,7 @@ indexer/.cursor
 # docs
 *.md
 !/README.md
+*.bak
 
 # os
 .DS_Store
