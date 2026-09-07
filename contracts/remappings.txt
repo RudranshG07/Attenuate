@@ -1,0 +1,3 @@
+@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/
+@ensv2/=lib/contracts-v2/contracts/src/
+forge-std/=lib/forge-std/src/
