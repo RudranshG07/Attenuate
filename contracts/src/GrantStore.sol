@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-contract GrantStore {
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
+
+contract GrantStore is EIP712 {
     struct Grant {
         uint256 capabilities;
         uint256 spendCap;
@@ -18,10 +21,27 @@ contract GrantStore {
         uint64 epoch;
     }
 
+    struct RootMandate {
+        uint256 node;
+        uint256 capabilities;
+        uint256 spendCap;
+        uint256 queryBudget;
+        uint64 expiry;
+        uint16 maxDepth;
+        uint256 nonce;
+    }
+
+    bytes32 private constant ROOT_MANDATE_TYPEHASH = keccak256(
+        "RootMandate(uint256 node,uint256 capabilities,uint256 spendCap,uint256 queryBudget,uint64 expiry,uint16 maxDepth,uint256 nonce)"
+    );
+
     uint256 public constant MAX_WALK = 8;
 
     address public owner;
     address public executor;
+    address public deviceKey;
+
+    mapping(uint256 => uint256) public nonces;
 
     mapping(uint256 => Grant) public grants;
     mapping(address => bool) public isRegistry;
@@ -39,8 +59,26 @@ contract GrantStore {
         _;
     }
 
-    constructor() {
+    constructor(address _deviceKey) EIP712("Attenuate", "1") {
         owner = msg.sender;
+        deviceKey = _deviceKey;
+    }
+
+    function hashMandate(RootMandate calldata m) public view returns (bytes32) {
+        return _hashTypedDataV4(
+            keccak256(
+                abi.encode(
+                    ROOT_MANDATE_TYPEHASH,
+                    m.node,
+                    m.capabilities,
+                    m.spendCap,
+                    m.queryBudget,
+                    m.expiry,
+                    m.maxDepth,
+                    m.nonce
+                )
+            )
+        );
     }
 
     function setExecutor(address e) external onlyOwner {
@@ -53,22 +91,23 @@ contract GrantStore {
         nodeOf[registry] = node;
     }
 
-    function initRoot(uint256 node, Grant calldata g) external onlyOwner {
-        require(node != 0, "BAD_NODE");
-        require(grants[node].epoch == 0, "ROOT_EXISTS");
+    function initRoot(RootMandate calldata m, bytes calldata sig) external {
+        require(m.node != 0, "BAD_NODE");
+        require(nonces[m.node]++ == m.nonce, "BAD_NONCE");
+        require(ECDSA.recover(hashMandate(m), sig) == deviceKey, "NOT_DEVICE");
+        require(grants[m.node].epoch == 0, "ROOT_EXISTS");
 
-        Grant storage r = grants[node];
-        r.capabilities = g.capabilities;
-        r.spendCap = g.spendCap;
-        r.spendRemaining = g.spendCap;
-        r.queryBudget = g.queryBudget;
-        r.queryRemaining = g.queryBudget;
-        r.expiry = g.expiry;
-        r.maxDepth = g.maxDepth;
-        r.readOnly = g.readOnly;
+        Grant storage r = grants[m.node];
+        r.capabilities = m.capabilities;
+        r.spendCap = m.spendCap;
+        r.spendRemaining = m.spendCap;
+        r.queryBudget = m.queryBudget;
+        r.queryRemaining = m.queryBudget;
+        r.expiry = m.expiry;
+        r.maxDepth = m.maxDepth;
         r.epoch = 1;
 
-        emit RootInitialised(node, r);
+        emit RootInitialised(m.node, r);
     }
 
     function _assertAttenuated(Grant memory p, Grant memory c) internal pure {

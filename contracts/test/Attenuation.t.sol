@@ -5,6 +5,8 @@ import {Test} from "forge-std/Test.sol";
 import {GrantStore} from "../src/GrantStore.sol";
 
 contract Harness is GrantStore {
+    constructor(address device) GrantStore(device) {}
+
     function exposed(Grant memory p, Grant memory c) external pure {
         _assertAttenuated(p, c);
     }
@@ -20,19 +22,31 @@ contract AttenuationTest is Test {
     address registry = address(0xBEEF);
     address childRegistry = address(0xCAFE);
 
+    uint256 deviceKey = 0xA11CE;
+    address device;
+
     function setUp() public {
-        h = new Harness();
+        device = vm.addr(deviceKey);
+        h = new Harness(device);
         h.authorizeRegistry(registry, ROOT);
         h.authorizeRegistry(childRegistry, CHILD);
-        h.initRoot(ROOT, _root());
+        _signRoot(deviceKey);
     }
 
-    function _root() internal view returns (GrantStore.Grant memory g) {
-        g.capabilities = 0xFF;
-        g.spendCap = 1000 ether;
-        g.queryBudget = 1000;
-        g.expiry = uint64(block.timestamp + 30 days);
-        g.maxDepth = 3;
+    function _mandate() internal view returns (GrantStore.RootMandate memory m) {
+        m.node = ROOT;
+        m.capabilities = 0xFF;
+        m.spendCap = 1000 ether;
+        m.queryBudget = 1000;
+        m.expiry = uint64(block.timestamp + 30 days);
+        m.maxDepth = 3;
+        m.nonce = 0;
+    }
+
+    function _signRoot(uint256 key) internal {
+        GrantStore.RootMandate memory m = _mandate();
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(key, h.hashMandate(m));
+        h.initRoot(m, abi.encodePacked(r, s, v));
     }
 
     function _child(uint256 cap, uint256 budget, uint16 depth)
@@ -142,5 +156,27 @@ contract AttenuationTest is Test {
         vm.prank(address(0xFEED));
         vm.expectRevert("PARENT_DEAD");
         h.grantTo(CHILD, _child(1 ether, 1, 2));
+    }
+
+    function test_RootRequiresTheDeviceSignature() public {
+        Harness fresh = new Harness(device);
+        GrantStore.RootMandate memory m = _mandate();
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(uint256(0xBADBAD), fresh.hashMandate(m));
+
+        vm.expectRevert("NOT_DEVICE");
+        fresh.initRoot(m, abi.encodePacked(r, s, v));
+    }
+
+    function test_MandateCannotBeReplayed() public {
+        GrantStore.RootMandate memory m = _mandate();
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(deviceKey, h.hashMandate(m));
+
+        vm.expectRevert("BAD_NONCE");
+        h.initRoot(m, abi.encodePacked(r, s, v));
+    }
+
+    function test_NoOwnerPathToSeedTheRoot() public {
+        Harness fresh = new Harness(device);
+        assertEq(fresh.grantOf(ROOT).epoch, 0);
     }
 }
