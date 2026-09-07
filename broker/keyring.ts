@@ -1,6 +1,13 @@
+import type { Hex, TypedDataDomain } from "viem";
+
 export interface KeyRingOptions {
   speculosUrl?: string;
   relayUrl?: string;
+}
+
+export interface TypedDataPayload {
+  primaryType: string;
+  message: Record<string, unknown>;
 }
 
 export async function isDeviceAvailable(o: KeyRingOptions = {}): Promise<boolean> {
@@ -8,10 +15,10 @@ export async function isDeviceAvailable(o: KeyRingOptions = {}): Promise<boolean
 }
 
 export async function signTypedData(
-  domain: unknown,
+  domain: TypedDataDomain,
   types: unknown,
-  message: unknown,
-): Promise<`0x${string}`> {
+  payload: TypedDataPayload,
+): Promise<Hex> {
   throw new Error("todo");
 }
 

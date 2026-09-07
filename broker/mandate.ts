@@ -1,8 +1,20 @@
-import type { RootMandate } from "./types.js";
+import type { Address, Hex, TypedDataDomain } from "viem";
+import { hashTypedData } from "viem";
+import { signTypedData } from "./keyring.js";
+
+export interface RootMandate {
+  node: bigint;
+  capabilities: bigint;
+  spendCap: bigint;
+  queryBudget: bigint;
+  expiry: bigint;
+  maxDepth: number;
+  nonce: bigint;
+}
 
 export const ROOT_MANDATE_TYPES = {
   RootMandate: [
-    { name: "rootNode", type: "bytes32" },
+    { name: "node", type: "uint256" },
     { name: "capabilities", type: "uint256" },
     { name: "spendCap", type: "uint256" },
     { name: "queryBudget", type: "uint256" },
@@ -12,15 +24,30 @@ export const ROOT_MANDATE_TYPES = {
   ],
 } as const;
 
-export function domain(chainId: number, verifyingContract: `0x${string}`) {
-  return {
-    name: "Attenuate",
-    version: "1",
-    chainId,
-    verifyingContract,
-  };
+export function domain(chainId: number, verifyingContract: Address): TypedDataDomain {
+  return { name: "Attenuate", version: "1", chainId, verifyingContract };
 }
 
-export async function signRootMandate(m: RootMandate): Promise<`0x${string}`> {
-  throw new Error("todo");
+export function mandateDigest(
+  chainId: number,
+  store: Address,
+  m: RootMandate,
+): Hex {
+  return hashTypedData({
+    domain: domain(chainId, store),
+    types: ROOT_MANDATE_TYPES,
+    primaryType: "RootMandate",
+    message: m,
+  });
+}
+
+export async function signRootMandate(
+  chainId: number,
+  store: Address,
+  m: RootMandate,
+): Promise<Hex> {
+  return signTypedData(domain(chainId, store), ROOT_MANDATE_TYPES, {
+    primaryType: "RootMandate",
+    message: { ...m },
+  });
 }
