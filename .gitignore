@@ -15,7 +15,6 @@ dist/
 contracts/out/
 contracts/cache/
 contracts/broadcast/
-contracts/lib/
 
 # subgraph
 subgraph/build/
