@@ -1,6 +1,6 @@
 import type { Address, Hex, TypedDataDomain } from "viem";
 import { hashTypedData } from "viem";
-import { signTypedData } from "./keyring.js";
+import { signTypedData } from "./device.js";
 
 export interface RootMandate {
   node: bigint;
@@ -46,7 +46,9 @@ export async function signRootMandate(
   store: Address,
   m: RootMandate,
 ): Promise<Hex> {
-  return signTypedData(domain(chainId, store), ROOT_MANDATE_TYPES, {
+  return signTypedData({
+    domain: domain(chainId, store),
+    types: ROOT_MANDATE_TYPES,
     primaryType: "RootMandate",
     message: { ...m },
   });

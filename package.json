@@ -6,6 +6,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@ledgerhq/wallet-cli": "^2.1.0",
     "viem": "^2.21.0"
   },
   "devDependencies": {
