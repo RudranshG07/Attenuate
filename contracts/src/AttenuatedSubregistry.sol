@@ -90,7 +90,7 @@ contract AttenuatedSubregistry is PermissionedRegistry {
             label, owner, childRegistry, resolver, _roleBitmapFor(grant), grant.expiry, false
         );
 
-        STORE.grantTo(tokenId, grant);
+        STORE.grantTo(tokenId, owner, grant);
 
         emit Granted(tokenId, label, owner, grant);
     }

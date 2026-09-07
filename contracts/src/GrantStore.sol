@@ -44,6 +44,7 @@ contract GrantStore is EIP712 {
     mapping(uint256 => uint256) public nonces;
 
     mapping(uint256 => Grant) public grants;
+    mapping(uint256 => address) public agentOf;
     mapping(address => bool) public isRegistry;
     mapping(address => uint256) public nodeOf;
 
@@ -119,7 +120,13 @@ contract GrantStore is EIP712 {
         require(!p.readOnly || c.readOnly, "READONLY_ESCALATION");
     }
 
-    function grantTo(uint256 childNode, Grant calldata g) external {
+    function setRootAgent(uint256 node, address agent) external onlyOwner {
+        require(grants[node].epoch != 0, "NOT_GRANTED");
+        require(agentOf[node] == address(0), "AGENT_SET");
+        agentOf[node] = agent;
+    }
+
+    function grantTo(uint256 childNode, address agent, Grant calldata g) external {
         require(isRegistry[msg.sender], "NOT_REGISTRY");
         require(childNode != 0, "BAD_NODE");
 
@@ -145,6 +152,7 @@ contract GrantStore is EIP712 {
         c.parent = parentNode;
         c.parentEpochAtGrant = p.epoch;
         c.epoch = 1;
+        agentOf[childNode] = agent;
 
         emit Granted(parentNode, childNode, c);
     }

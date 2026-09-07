@@ -12,7 +12,7 @@ contract CapabilityRegistry {
         bool enabled;
     }
 
-    address public immutable budgetAsset;
+    address public immutable BUDGET_ASSET;
     address public owner;
 
     mapping(uint8 => CapSpec) internal _caps;
@@ -27,8 +27,8 @@ contract CapabilityRegistry {
         _;
     }
 
-    constructor(address _budgetAsset) {
-        budgetAsset = _budgetAsset;
+    constructor(address budgetAsset) {
+        BUDGET_ASSET = budgetAsset;
         owner = msg.sender;
     }
 
@@ -36,11 +36,13 @@ contract CapabilityRegistry {
         external
         onlyOwner
     {
-        // TODO
+        _caps[bit] = CapSpec(target, selector, amountArgIndex, readSafe, true);
+        emit CapSet(bit, target, selector, amountArgIndex, readSafe);
     }
 
     function disableCap(uint8 bit) external onlyOwner {
-        // TODO
+        _caps[bit].enabled = false;
+        emit CapDisabled(bit);
     }
 
     function caps(uint8 bit) external view returns (CapSpec memory) {

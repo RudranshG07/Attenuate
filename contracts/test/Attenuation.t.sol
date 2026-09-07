@@ -19,6 +19,7 @@ contract AttenuationTest is Test {
     uint256 constant CHILD = 2;
     uint256 constant GRANDCHILD = 3;
 
+    address agent = address(0xA6E7);
     address registry = address(0xBEEF);
     address childRegistry = address(0xCAFE);
 
@@ -93,7 +94,7 @@ contract AttenuationTest is Test {
 
     function test_AllocationDebitsParentImmediately() public {
         vm.prank(registry);
-        h.grantTo(CHILD, _child(400 ether, 300, 2));
+        h.grantTo(CHILD, agent, _child(400 ether, 300, 2));
 
         GrantStore.Grant memory p = h.grantOf(ROOT);
         assertEq(p.spendRemaining, 600 ether);
@@ -107,38 +108,38 @@ contract AttenuationTest is Test {
 
     function test_SecondChildCannotTakeAlreadyAllocatedBudget() public {
         vm.prank(registry);
-        h.grantTo(CHILD, _child(1000 ether, 0, 2));
+        h.grantTo(CHILD, agent, _child(1000 ether, 0, 2));
 
         vm.prank(registry);
         vm.expectRevert("CAP_EXCEEDS_UNALLOCATED");
-        h.grantTo(GRANDCHILD, _child(1 ether, 0, 2));
+        h.grantTo(GRANDCHILD, agent, _child(1 ether, 0, 2));
     }
 
     function test_SecondChildCannotTakeAlreadyAllocatedQueryBudget() public {
         vm.prank(registry);
-        h.grantTo(CHILD, _child(0, 1000, 2));
+        h.grantTo(CHILD, agent, _child(0, 1000, 2));
 
         vm.prank(registry);
         vm.expectRevert("BUDGET_EXCEEDS_UNALLOCATED");
-        h.grantTo(GRANDCHILD, _child(0, 1, 2));
+        h.grantTo(GRANDCHILD, agent, _child(0, 1, 2));
     }
 
     function test_MaxDepthZeroIsALeaf() public {
         GrantStore.Grant memory leaf = _child(1 ether, 1, 0);
         vm.prank(registry);
-        h.grantTo(CHILD, leaf);
+        h.grantTo(CHILD, agent, leaf);
 
         vm.prank(childRegistry);
         vm.expectRevert("DEPTH_EXCEEDED");
-        h.grantTo(GRANDCHILD, _child(1 ether, 1, 0));
+        h.grantTo(GRANDCHILD, agent, _child(1 ether, 1, 0));
     }
 
     function test_DepthNarrowsEachHop() public {
         vm.prank(registry);
-        h.grantTo(CHILD, _child(10 ether, 10, 2));
+        h.grantTo(CHILD, agent, _child(10 ether, 10, 2));
 
         vm.prank(childRegistry);
-        h.grantTo(GRANDCHILD, _child(1 ether, 1, 1));
+        h.grantTo(GRANDCHILD, agent, _child(1 ether, 1, 1));
 
         assertEq(h.depthOf(ROOT), 0);
         assertEq(h.depthOf(CHILD), 1);
@@ -148,14 +149,14 @@ contract AttenuationTest is Test {
     function test_OnlyAnAuthorizedRegistryMayGrant() public {
         vm.prank(address(0xDEAD));
         vm.expectRevert("NOT_REGISTRY");
-        h.grantTo(CHILD, _child(1 ether, 1, 2));
+        h.grantTo(CHILD, agent, _child(1 ether, 1, 2));
     }
 
     function test_NothingMintsUnderAnUninitialisedParent() public {
         h.authorizeRegistry(address(0xFEED), 99);
         vm.prank(address(0xFEED));
         vm.expectRevert("PARENT_DEAD");
-        h.grantTo(CHILD, _child(1 ether, 1, 2));
+        h.grantTo(CHILD, agent, _child(1 ether, 1, 2));
     }
 
     function test_RootRequiresTheDeviceSignature() public {

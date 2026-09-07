@@ -1,37 +1,57 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import {AttenuatedSubregistry} from "./AttenuatedSubregistry.sol";
 import {CapabilityRegistry} from "./CapabilityRegistry.sol";
+import {GrantStore} from "./GrantStore.sol";
 
 contract Executor {
-    AttenuatedSubregistry public immutable registry;
-    CapabilityRegistry public immutable capReg;
+    GrantStore public immutable STORE;
+    CapabilityRegistry public immutable CAPS;
 
     uint8 internal constant NO_AMOUNT = 0xFF;
 
     uint256 private _lock = 1;
 
-    event Executed(bytes32 indexed node, uint8 indexed capBit, address target, uint256 spend);
+    event Executed(uint256 indexed node, uint8 indexed capBit, address target, uint256 spend);
 
     modifier nonReentrant() {
-        require(_lock == 1, "REENTRANT");
-        _lock = 2;
+        _enter();
         _;
         _lock = 1;
     }
 
-    constructor(AttenuatedSubregistry _registry, CapabilityRegistry _capReg) {
-        registry = _registry;
-        capReg = _capReg;
+    constructor(GrantStore store, CapabilityRegistry caps) {
+        STORE = store;
+        CAPS = caps;
     }
 
-    function execute(bytes32 node, uint8 capBit, address target, uint256 value, bytes calldata data)
+    function execute(uint256 node, uint8 capBit, address target, uint256 value, bytes calldata data)
         external
         nonReentrant
         returns (bytes memory)
     {
-        // TODO
+        require(msg.sender == STORE.agentOf(node), "NOT_AGENT");
+        require(STORE.isLive(node), "REVOKED_OR_EXPIRED");
+
+        CapabilityRegistry.CapSpec memory s = CAPS.caps(capBit);
+        require(s.enabled, "CAP_DISABLED");
+
+        GrantStore.Grant memory g = STORE.grantOf(node);
+        require(g.capabilities & (1 << capBit) != 0, "CAP_MISSING");
+        require(!g.readOnly || (s.readSafe && value == 0), "READONLY");
+
+        require(data.length >= 4, "CALLDATA_SHORT");
+        require(target == s.target, "TARGET_MISMATCH");
+        require(bytes4(data[:4]) == s.selector, "SELECTOR_MISMATCH");
+
+        uint256 spend = value + _extractAmount(data, s.amountArgIndex);
+        STORE.spend(node, spend);
+
+        (bool ok, bytes memory ret) = target.call{value: value}(data);
+        require(ok, "CALL_FAILED");
+
+        emit Executed(node, capBit, target, spend);
+        return ret;
     }
 
     function _extractAmount(bytes calldata data, uint8 idx) internal pure returns (uint256 v) {
@@ -43,7 +63,10 @@ contract Executor {
         }
     }
 
-    function _resolveAddr(bytes32 node) internal view returns (address) {
-        // TODO
+    function _enter() internal {
+        require(_lock == 1, "REENTRANT");
+        _lock = 2;
     }
+
+    receive() external payable {}
 }
