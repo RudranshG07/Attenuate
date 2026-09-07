@@ -1,122 +1,104 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import {IENSv2} from "./interfaces/IENSv2.sol";
+import {PermissionedRegistry} from "@ensv2/registry/PermissionedRegistry.sol";
+import {IRegistry} from "@ensv2/registry/interfaces/IRegistry.sol";
+import {ILabelStore} from "@ensv2/utils/interfaces/ILabelStore.sol";
+import {RegistryRolesLib} from "@ensv2/registry/libraries/RegistryRolesLib.sol";
 
-contract AttenuatedSubregistry {
-    struct Grant {
-        uint256 capabilities;
-        uint256 spendCap;
-        uint256 spendRemaining;
-        uint256 queryBudget;
-        uint256 queryRemaining;
-        uint64 expiry;
-        uint16 maxDepth;
-        bool readOnly;
-        bool revoked;
-        bool reclaimed;
-        bytes32 parent;
-        uint64 parentEpochAtGrant;
-        uint64 epoch;
-    }
+import {GrantStore} from "./GrantStore.sol";
 
-    struct RootMandate {
-        bytes32 rootNode;
-        uint256 capabilities;
-        uint256 spendCap;
-        uint256 queryBudget;
-        uint64 expiry;
-        uint16 maxDepth;
-        uint256 nonce;
-    }
+contract AttenuatedSubregistry is PermissionedRegistry {
+    GrantStore public immutable STORE;
 
-    bytes32 public constant ROOT = bytes32(0);
-    uint256 public constant MAX_WALK = 8;
+    error UseRegisterWithGrant();
 
-    bytes32 public constant ROLE_GRANT = keccak256("ROLE_GRANT");
-    bytes32 public constant ROLE_REVOKE = keccak256("ROLE_REVOKE");
-    bytes32 public constant ROLE_BUDGET = keccak256("ROLE_BUDGET");
-    bytes32 public constant ROLE_EXTEND = keccak256("ROLE_EXTEND");
-
-    mapping(bytes32 => Grant) public grants;
-    mapping(bytes32 => uint256) public nonces;
-
-    address public deviceKey;
-
-    event Granted(bytes32 indexed parentNode, bytes32 indexed childNode, string label, address owner, Grant grant);
-    event Revoked(bytes32 indexed node, uint64 newEpoch);
-    event Reclaimed(bytes32 indexed node, bytes32 indexed toAncestor, uint256 spend, uint256 query);
+    event Granted(uint256 indexed tokenId, string label, address owner, GrantStore.Grant grant);
     event EscalationBlocked(
-        bytes32 indexed parentNode,
         address indexed attemptedBy,
         string label,
-        Grant proposed,
+        GrantStore.Grant proposed,
         string reason,
         uint256 timestamp
     );
 
-    function initRoot(RootMandate calldata m, bytes calldata sig) external {
-        // TODO
-    }
-
-    function _assertAttenuated(Grant memory p, Grant memory c) internal pure {
-        require(c.capabilities & p.capabilities == c.capabilities, "SCOPE_WIDENED");
-        require(c.spendCap <= p.spendRemaining, "CAP_EXCEEDS_UNALLOCATED");
-        require(c.queryBudget <= p.queryRemaining, "BUDGET_EXCEEDS_UNALLOCATED");
-        require(c.expiry <= p.expiry, "EXPIRY_EXTENDED");
-        require(c.maxDepth < p.maxDepth, "DEPTH_EXCEEDED");
-        require(!p.readOnly || c.readOnly, "READONLY_ESCALATION");
-    }
-
-    function register(bytes32 parentNode, string calldata label, address owner, Grant calldata childGrant)
-        external
-        returns (bytes32 childNode)
+    constructor(ILabelStore labelStore, address rootAccount, uint256 roleBitmap, GrantStore store)
+        PermissionedRegistry(labelStore, rootAccount, roleBitmap)
     {
-        // TODO
+        STORE = store;
     }
 
-    function registerOrLog(bytes32 parentNode, string calldata label, address owner, Grant calldata childGrant)
-        external
-        returns (bytes32 childNode, bool ok, string memory reason)
+    function register(string memory, address, IRegistry, address, uint256, uint64)
+        public
+        pure
+        override
+        returns (uint256)
     {
-        // TODO
+        revert UseRegisterWithGrant();
     }
 
-    function revoke(bytes32 node) external {
-        // TODO
+    function registerWithGrant(
+        string calldata label,
+        address owner,
+        address resolver,
+        IRegistry childRegistry,
+        GrantStore.Grant calldata grant
+    ) external returns (uint256 tokenId) {
+        _checkRoles(ROOT_RESOURCE, RegistryRolesLib.ROLE_REGISTRAR, msg.sender);
+        return _mintAttenuated(label, owner, resolver, childRegistry, grant);
     }
 
-    function reclaim(bytes32 node) external {
-        // TODO
-    }
+    function registerOrLog(
+        string calldata label,
+        address owner,
+        address resolver,
+        IRegistry childRegistry,
+        GrantStore.Grant calldata grant
+    ) external returns (uint256 tokenId, bool ok, string memory reason) {
+        _checkRoles(ROOT_RESOURCE, RegistryRolesLib.ROLE_REGISTRAR, msg.sender);
 
-    function isLive(bytes32 node) public view returns (bool) {
-        bytes32 cur = node;
-        for (uint256 i = 0; i < MAX_WALK; i++) {
-            if (cur == ROOT) return true;
-            Grant storage g = grants[cur];
-            if (g.epoch == 0) return false;
-            if (g.revoked) return false;
-            if (g.expiry < block.timestamp) return false;
-            if (g.parentEpochAtGrant != grants[g.parent].epoch) return false;
-            cur = g.parent;
+        try this.selfMint(label, owner, resolver, childRegistry, grant) returns (uint256 id) {
+            return (id, true, "");
+        } catch Error(string memory r) {
+            emit EscalationBlocked(msg.sender, label, grant, r, block.timestamp);
+            return (0, false, r);
+        } catch {
+            emit EscalationBlocked(msg.sender, label, grant, "REVERTED", block.timestamp);
+            return (0, false, "REVERTED");
         }
-        return false;
     }
 
-    function _nearestLiveAncestor(bytes32 node) internal view returns (bytes32) {
-        // TODO
+    function selfMint(
+        string calldata label,
+        address owner,
+        address resolver,
+        IRegistry childRegistry,
+        GrantStore.Grant calldata grant
+    ) external returns (uint256) {
+        require(msg.sender == address(this), "ONLY_SELF");
+        return _mintAttenuated(label, owner, resolver, childRegistry, grant);
     }
 
-    function _hasRole(address who, bytes32 node, bytes32 role) internal view returns (bool) {
-        // TODO
+    function _mintAttenuated(
+        string calldata label,
+        address owner,
+        address resolver,
+        IRegistry childRegistry,
+        GrantStore.Grant calldata grant
+    ) internal returns (uint256 tokenId) {
+        tokenId = _register(
+            label, owner, childRegistry, resolver, _roleBitmapFor(grant), grant.expiry, false
+        );
+
+        STORE.grantTo(tokenId, grant);
+
+        emit Granted(tokenId, label, owner, grant);
     }
 
-    function _mintSubname(bytes32 parentNode, string calldata label, address owner) internal {
-        // TODO
-    }
-
-    function _writeGrantToResolver(bytes32 node, Grant storage g) internal {
-        // TODO
+    function _roleBitmapFor(GrantStore.Grant calldata g) internal pure returns (uint256 bitmap) {
+        bitmap = RegistryRolesLib.ROLE_SET_RESOLVER;
+        if (g.capabilities & (1 << 7) != 0) {
+            bitmap |= RegistryRolesLib.ROLE_REGISTRAR | RegistryRolesLib.ROLE_SET_SUBREGISTRY;
+        }
     }
 }
