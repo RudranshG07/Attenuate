@@ -28,6 +28,7 @@ indexer/.cursor
 !/README.md
 !/mcp-server/SKILL.md
 *.bak
+*.docx
 
 # os
 .DS_Store

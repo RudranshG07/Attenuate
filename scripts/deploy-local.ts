@@ -28,9 +28,49 @@ const store = await deploy("GrantStore", [account.address]);
 const caps = await deploy("CapabilityRegistry", ["0x0000000000000000000000000000000000000000"]);
 const executor = await deploy("Executor", [store, caps]);
 
+const labels = await deploy("MockLabelStore", []);
+
+const ROLE_REGISTRAR = 1n << 0n;
+const ROLE_REGISTRAR_ADMIN = ROLE_REGISTRAR << 128n;
+const ROLE_SET_RESOLVER = 1n << 24n;
+const ROLE_SET_SUBREGISTRY = 1n << 20n;
+const roles = ROLE_REGISTRAR | ROLE_REGISTRAR_ADMIN | ROLE_SET_RESOLVER | ROLE_SET_SUBREGISTRY;
+
+const registry = await deploy("AttenuatedSubregistry", [labels, account.address, roles, store]);
+
 const storeAbi = artifact("GrantStore").abi;
 await wallet.writeContract({ address: store, abi: storeAbi, functionName: "setExecutor", args: [executor] });
 
-const out = { chainId: foundry.id, store, caps, executor, device: account.address };
+const ROOT = 1n;
+await wallet.writeContract({
+  address: store, abi: storeAbi, functionName: "authorizeRegistry", args: [registry, ROOT],
+});
+
+// The anvil account is the device key, so it can sign its own root mandate.
+const mandate = {
+  node: ROOT,
+  capabilities: 0xffn,
+  spendCap: 1000n * 10n ** 18n,
+  queryBudget: 1000n,
+  expiry: BigInt(Math.floor(Date.now() / 1000) + 30 * 86400),
+  maxDepth: 3,
+  nonce: 0n,
+};
+const sig = await wallet.signTypedData({
+  domain: { name: "Attenuate", version: "1", chainId: foundry.id, verifyingContract: store },
+  types: { RootMandate: [
+    { name: "node", type: "uint256" }, { name: "capabilities", type: "uint256" },
+    { name: "spendCap", type: "uint256" }, { name: "queryBudget", type: "uint256" },
+    { name: "expiry", type: "uint64" }, { name: "maxDepth", type: "uint16" },
+    { name: "nonce", type: "uint256" } ] },
+  primaryType: "RootMandate",
+  message: mandate,
+});
+await wallet.writeContract({
+  address: store, abi: storeAbi, functionName: "initRoot", args: [mandate, sig],
+});
+console.log("root mandate signed and seeded");
+
+const out = { chainId: foundry.id, store, caps, executor, registry, labels, root: ROOT.toString(), device: account.address };
 writeFileSync("deployments/local.json", JSON.stringify(out, null, 2));
 console.log("\nwrote deployments/local.json");
