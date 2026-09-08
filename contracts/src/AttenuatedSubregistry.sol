@@ -95,10 +95,11 @@ contract AttenuatedSubregistry is PermissionedRegistry {
         emit Granted(tokenId, label, owner, grant);
     }
 
+    // No ROLE_SET_RESOLVER: an agent that can repoint its own resolver can
+    // rewrite the permissions its name publishes.
     function _roleBitmapFor(GrantStore.Grant calldata g) internal pure returns (uint256 bitmap) {
-        bitmap = RegistryRolesLib.ROLE_SET_RESOLVER;
         if (g.capabilities & (1 << 7) != 0) {
-            bitmap |= RegistryRolesLib.ROLE_REGISTRAR | RegistryRolesLib.ROLE_SET_SUBREGISTRY;
+            bitmap = RegistryRolesLib.ROLE_REGISTRAR | RegistryRolesLib.ROLE_SET_SUBREGISTRY;
         }
     }
 }

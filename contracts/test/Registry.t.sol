@@ -132,4 +132,19 @@ contract RegistryTest is Test {
         );
         assertTrue(reg.hasRoles(id, RegistryRolesLib.ROLE_REGISTRAR, agent));
     }
+
+    function test_ChildCannotRepointItsOwnResolver() public {
+        uint256 id = reg.registerWithGrant(
+            "exec", agent, address(0), IRegistry(address(0)), _grant(0x04, 1 ether, 0)
+        );
+        assertFalse(reg.hasRoles(id, RegistryRolesLib.ROLE_SET_RESOLVER, agent));
+    }
+
+    function test_DelegatingChildStillCannotRepointResolver() public {
+        uint256 id = reg.registerWithGrant(
+            "risk", agent, address(0), IRegistry(address(0)), _grant(0x84, 1 ether, 1)
+        );
+        assertTrue(reg.hasRoles(id, RegistryRolesLib.ROLE_REGISTRAR, agent));
+        assertFalse(reg.hasRoles(id, RegistryRolesLib.ROLE_SET_RESOLVER, agent));
+    }
 }
