@@ -26,6 +26,7 @@ indexer/.cursor
 # docs
 *.md
 !/README.md
+!/mcp-server/SKILL.md
 *.bak
 
 # os
