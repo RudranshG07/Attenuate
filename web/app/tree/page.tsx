@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import s from "../components/tree.module.css";
 import { Tree } from "../components/Tree";
 import { Feed } from "../components/Feed";
@@ -28,6 +28,28 @@ export default function TreePage() {
   const [query, setQuery] = useState("attenuate.eth");
   const [flashId, setFlashId] = useState<string | null>(null);
   const [reorg, setReorg] = useState(false);
+  const [chain, setChain] = useState<"checking" | "live" | "demo">("checking");
+
+  // Prefer real chain state; fall back to the demo tree so the screen is never empty.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/tree")
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        if (d.connected && d.root) {
+          setRoot(d.root);
+          setQuery(d.root.name);
+          setChain("live");
+        } else {
+          setChain("demo");
+        }
+      })
+      .catch(() => !cancelled && setChain("demo"));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const view = useMemo(() => find(root, query.trim() || root.name), [root, query]);
 
@@ -96,6 +118,9 @@ export default function TreePage() {
         <span className={s.wordmark}>Attenuate</span>
         <span className={s.tagline}>a child name can never hold more power than its parent</span>
         <span className={s.spacer} />
+        <span className={s.status} data-state={chain}>
+          {chain === "live" ? "anvil" : chain === "demo" ? "demo data" : "connecting"}
+        </span>
         <label htmlFor="q" style={{ color: "var(--dim)", fontSize: 12.5 }}>
           Resolve
         </label>

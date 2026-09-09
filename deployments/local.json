@@ -6,5 +6,6 @@
   "registry": "0xdc64a140aa3e981100a9beca4e685f962f0cf6c9",
   "labels": "0xcf7ed3acca5a467e9e704c703e8d87f634fb0fc9",
   "root": "1",
-  "device": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+  "device": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+  "riskRegistry": "0x610178da211fef7d417bc0e6fed39f05609ad788"
 }
