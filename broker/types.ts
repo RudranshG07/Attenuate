@@ -9,13 +9,14 @@ export interface Grant {
   readOnly: boolean;
   revoked: boolean;
   reclaimed: boolean;
-  parent: `0x${string}`;
+  parent: bigint;
   parentEpochAtGrant: bigint;
   epoch: bigint;
 }
 
+// Matches GrantStore.RootMandate. The earlier `rootNode: 0x…` shape was wrong.
 export interface RootMandate {
-  rootNode: `0x${string}`;
+  node: bigint;
   capabilities: bigint;
   spendCap: bigint;
   queryBudget: bigint;

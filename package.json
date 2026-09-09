@@ -14,6 +14,7 @@
     "web:build": "next build web",
     "chain": "anvil",
     "deploy:local": "tsx scripts/deploy-local.ts",
+    "deploy:forge": "forge script --root contracts script/Deploy.s.sol:Deploy --rpc-url http://127.0.0.1:8545 --broadcast",
     "seed": "tsx scripts/seed-demo.ts",
     "smoke": "tsx scripts/smoke.ts",
     "speculos": "./scripts/speculos.sh",
