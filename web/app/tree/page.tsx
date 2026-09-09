@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import s from "../components/tree.module.css";
 import { Tree } from "../components/Tree";
 import { Feed } from "../components/Feed";
-import { demoFeed, demoTree } from "../lib/demo";
 import type { AgentNode, FeedItem } from "../lib/model";
+
+type Conn = "checking" | "live" | "down";
 
 function find(node: AgentNode, name: string): AgentNode | null {
   if (node.name === name) return node;
@@ -16,101 +17,69 @@ function find(node: AgentNode, name: string): AgentNode | null {
   return null;
 }
 
-function markDead(node: AgentNode): AgentNode {
-  return { ...node, state: "dead", children: node.children.map(markDead) };
-}
-
-let seq = 0;
-
 export default function TreePage() {
-  const [root, setRoot] = useState<AgentNode>(demoTree);
-  const [feed, setFeed] = useState<FeedItem[]>(demoFeed);
-  const [query, setQuery] = useState("attenuate.eth");
+  const [root, setRoot] = useState<AgentNode | null>(null);
+  const [feed, setFeed] = useState<FeedItem[]>([]);
+  const [conn, setConn] = useState<Conn>("checking");
+  const [query, setQuery] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
   const [flashId, setFlashId] = useState<string | null>(null);
-  const [reorg, setReorg] = useState(false);
-  const [chain, setChain] = useState<"checking" | "live" | "demo">("checking");
+  const [error, setError] = useState<string | null>(null);
 
-  // Prefer real chain state; fall back to the demo tree so the screen is never empty.
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/tree")
-      .then((r) => r.json())
-      .then((d) => {
-        if (cancelled) return;
-        if (d.connected && d.root) {
-          setRoot(d.root);
-          setQuery(d.root.name);
-          setChain("live");
-        } else {
-          setChain("demo");
-        }
-      })
-      .catch(() => !cancelled && setChain("demo"));
-    return () => {
-      cancelled = true;
-    };
+  const refresh = useCallback(async () => {
+    try {
+      const [t, f] = await Promise.all([
+        fetch("/api/tree", { cache: "no-store" }).then((r) => r.json()),
+        fetch("/api/feed", { cache: "no-store" }).then((r) => r.json()),
+      ]);
+      if (!t.connected) {
+        setConn("down");
+        return;
+      }
+      setConn("live");
+      setRoot(t.root);
+      setFeed(f.items ?? []);
+      setQuery((q) => q || t.root?.name || "");
+    } catch {
+      setConn("down");
+    }
   }, []);
 
-  const view = useMemo(() => find(root, query.trim() || root.name), [root, query]);
+  useEffect(() => {
+    refresh();
+    const i = setInterval(refresh, 4000);
+    return () => clearInterval(i);
+  }, [refresh]);
 
-  function push(item: Omit<FeedItem, "id" | "at">) {
-    setFeed((f) => [{ ...item, id: `n${seq++}`, at: "now" }, ...f]);
-  }
+  const view = useMemo(
+    () => (root ? find(root, query.trim() || root.name) : null),
+    [root, query],
+  );
 
-  function grant() {
-    const label = `task${seq}`;
-    const child: AgentNode = {
-      id: `n${seq++}`,
-      name: `${label}.exec.attenuate.eth`,
-      capabilities: ["lend.aave.repay"],
-      spendCap: 20,
-      spendRemaining: 20,
-      queryRemaining: 4,
-      expiresIn: "10m",
-      maxDepth: 0,
-      readOnly: false,
-      state: "live",
-      children: [],
-    };
-    setRoot((r) => {
-      const next = structuredClone(r);
-      const exec = find(next, "exec.attenuate.eth");
-      if (exec) {
-        exec.children.push(child);
-        exec.spendRemaining = Math.max(0, exec.spendRemaining - child.spendCap);
+  async function act(action: "grant" | "escalate" | "revoke") {
+    setBusy(action);
+    setError(null);
+    try {
+      const r = await fetch("/api/act", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      }).then((x) => x.json());
+
+      if (!r.ok) setError(r.error ?? "transaction failed");
+      if (action === "escalate" && root) {
+        setFlashId(root.id);
+        setTimeout(() => setFlashId(null), 700);
       }
-      return next;
-    });
-    push({ kind: "granted", name: child.name, detail: "repay only, 20 USDC, expires 10m", txHash: randomHash() });
+      await refresh();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(null);
+    }
   }
 
-  function escalate() {
-    const target = find(root, "exec.attenuate.eth");
-    if (!target) return;
-    setFlashId(target.id);
-    setTimeout(() => setFlashId(null), 600);
-    push({
-      kind: "blocked",
-      name: target.name,
-      detail: "planner proposed swap + approve, cap 900 USDC",
-      reason: "SCOPE_WIDENED",
-      txHash: randomHash(),
-    });
-  }
-
-  function revoke() {
-    setRoot((r) => markDead(r));
-    push({ kind: "revoked", name: root.name, detail: "epoch bumped, whole subtree dead in one tx", txHash: randomHash() });
-  }
-
-  function reset() {
-    setRoot(demoTree);
-    setFeed(demoFeed);
-    setQuery("attenuate.eth");
-    setReorg(false);
-  }
-
-  const dead = root.state === "dead";
+  const dead = root?.state === "dead";
 
   return (
     <main className={s.screen}>
@@ -118,12 +87,10 @@ export default function TreePage() {
         <span className={s.wordmark}>Attenuate</span>
         <span className={s.tagline}>a child name can never hold more power than its parent</span>
         <span className={s.spacer} />
-        <span className={s.status} data-state={chain}>
-          {chain === "live" ? "anvil" : chain === "demo" ? "demo data" : "connecting"}
+        <span className={s.status} data-state={conn}>
+          {conn === "live" ? "chain connected" : conn === "down" ? "no chain" : "connecting"}
         </span>
-        <label htmlFor="q" style={{ color: "var(--dim)", fontSize: 12.5 }}>
-          Resolve
-        </label>
+        <label htmlFor="q" style={{ color: "var(--dim)", fontSize: 12.5 }}>Resolve</label>
         <input
           id="q"
           value={query}
@@ -135,37 +102,53 @@ export default function TreePage() {
         />
       </header>
 
-      {reorg && (
-        <div className={s.banner} role="status">
-          Reorg detected at block 8,214,559. Tree state may be stale until the next
-          irreversible block.
+      {error && (
+        <div className={s.banner} role="alert">
+          {error}
+          <button onClick={() => setError(null)} className={s.bannerAction}>Dismiss</button>
         </div>
       )}
 
-      <section className={s.stage} aria-label="Permission tree">
-        <Tree root={view} flashId={flashId} />
+      <section className={s.stage} aria-label="Permission tree" aria-busy={conn === "checking"}>
+        {conn === "checking" && <div className={s.skeleton} aria-hidden="true" />}
+        {conn === "down" && (
+          <p className={s.empty}>
+            No chain reachable. Start one, deploy, and seed a tree:
+            <br />
+            <span className="mono">npm run chain</span>
+            <br />
+            <span className="mono">npm run deploy:local</span>
+            <br />
+            <span className="mono">npx tsx scripts/seed-demo.ts</span>
+          </p>
+        )}
+        {conn === "live" && !root && (
+          <p className={s.empty}>
+            Contracts are deployed but no root mandate has been signed yet. Run{" "}
+            <span className="mono">npm run deploy:local</span>.
+          </p>
+        )}
+        {conn === "live" && root && <Tree root={view} flashId={flashId} />}
       </section>
 
-      <aside className={s.rail} aria-label="Transaction feed">
+      <aside className={s.rail} aria-label="On-chain activity">
         <h2 className={s.railHead}>On-chain activity</h2>
         <Feed items={feed} />
       </aside>
 
       <footer className={s.bottom}>
-        <button onClick={grant} disabled={dead}>Grant capability</button>
-        <button onClick={escalate} disabled={dead}>Attempt escalation</button>
-        <button onClick={revoke} disabled={dead}>Revoke root</button>
+        <button onClick={() => act("grant")} disabled={!root || dead || busy !== null}>
+          {busy === "grant" ? "Granting…" : "Grant capability"}
+        </button>
+        <button onClick={() => act("escalate")} disabled={!root || dead || busy !== null}>
+          {busy === "escalate" ? "Attempting…" : "Attempt escalation"}
+        </button>
+        <button onClick={() => act("revoke")} disabled={!root || dead || busy !== null}>
+          {busy === "revoke" ? "Revoking…" : "Revoke root"}
+        </button>
         <span className={s.spacer} />
-        <button onClick={() => setReorg((r) => !r)}>{reorg ? "Clear reorg" : "Simulate reorg"}</button>
-        {dead && <button onClick={reset}>Reset demo</button>}
+        {dead && <span className={s.deadNote}>Root revoked. Whole subtree dead.</span>}
       </footer>
     </main>
   );
-}
-
-function randomHash() {
-  const hex = "0123456789abcdef";
-  let out = "0x";
-  for (let i = 0; i < 12; i++) out += hex[Math.floor(Math.random() * 16)];
-  return out;
 }

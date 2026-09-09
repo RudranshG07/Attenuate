@@ -36,7 +36,7 @@
   padding: 3px 9px;
 }
 .status[data-state="live"] { color: var(--live); border-color: var(--live-dim); }
-.status[data-state="demo"] { color: var(--dimmer); }
+.status[data-state="down"] { color: var(--block); border-color: var(--block-dim); }
 
 .stage {
   background: var(--bg);
@@ -245,6 +245,37 @@
   color: var(--block);
   margin-top: 6px;
 }
-.hash { display: block; font-family: var(--mono); font-size: 10.5px; color: var(--dimmer); margin-top: 7px; }
+.hash {
+  display: block;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--dimmer);
+  margin-top: 7px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .empty { padding: 28px 16px; color: var(--dim); font-size: 12.5px; line-height: 1.5; }
+
+.bannerAction {
+  margin-left: 12px;
+  min-height: 28px;
+  padding: 3px 10px;
+  font-size: 12px;
+}
+.deadNote { color: var(--block); font-size: 12.5px; }
+.skeleton {
+  width: 292px;
+  height: 96px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, var(--panel) 0%, var(--panel-2) 50%, var(--panel) 100%);
+  background-size: 200% 100%;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .skeleton { animation: shimmer 1.4s ease-in-out infinite; }
+}
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}

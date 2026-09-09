@@ -1,0 +1,65 @@
+import { readFileSync } from "node:fs";
+import { createPublicClient, createWalletClient, http, parseAbiItem } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+import { foundry } from "viem/chains";
+
+export const GRANT_TUPLE =
+  "(uint256 capabilities,uint256 spendCap,uint256 spendRemaining,uint256 queryBudget,uint256 queryRemaining,uint64 expiry,uint16 maxDepth,bool readOnly,bool revoked,bool reclaimed,uint256 parent,uint64 parentEpochAtGrant,uint64 epoch)";
+
+export const events = {
+  rootInit: parseAbiItem(`event RootInitialised(uint256 indexed node, ${GRANT_TUPLE} grant)`),
+  granted: parseAbiItem(`event Granted(uint256 indexed parent, uint256 indexed child, ${GRANT_TUPLE} grant)`),
+  named: parseAbiItem(`event Granted(uint256 indexed tokenId, string label, address owner, ${GRANT_TUPLE} grant)`),
+  blocked: parseAbiItem(`event EscalationBlocked(address indexed attemptedBy, string label, ${GRANT_TUPLE} proposed, string reason, uint256 timestamp)`),
+  revoked: parseAbiItem("event Revoked(uint256 indexed node, uint64 epoch)"),
+  reclaimed: parseAbiItem("event Reclaimed(uint256 indexed node, uint256 indexed toAncestor, uint256 spend, uint256 query)"),
+  executed: parseAbiItem("event Executed(uint256 indexed node, uint8 indexed capBit, address target, uint256 spend)"),
+};
+
+export function root() {
+  return process.cwd().replace(/\/web$/, "");
+}
+
+export function deployment() {
+  return JSON.parse(readFileSync(`${root()}/deployments/local.json`, "utf8"));
+}
+
+export function abiOf(name: string) {
+  return JSON.parse(readFileSync(`${root()}/contracts/out/${name}.sol/${name}.json`, "utf8")).abi;
+}
+
+export function client() {
+  return createPublicClient({
+    chain: foundry,
+    transport: http(process.env.RPC_URL ?? "http://127.0.0.1:8545"),
+  });
+}
+
+// The broker is a server-side process; in the demo it holds the deployer key.
+export function broker() {
+  const pk = (process.env.BROKER_KEY ??
+    "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80") as `0x${string}`;
+  return createWalletClient({
+    account: privateKeyToAccount(pk),
+    chain: foundry,
+    transport: http(process.env.RPC_URL ?? "http://127.0.0.1:8545"),
+  });
+}
+
+export const RANGE = { fromBlock: 0n, toBlock: "latest" } as const;
+
+export const CAPS = [
+  "swap.uniswap", "lend.aave.supply", "lend.aave.repay", "lend.aave.withdraw",
+  "erc20.approve", "transfer.native", "data.graph.read", "delegate",
+];
+
+export const decodeCaps = (m: bigint) => CAPS.filter((_, i) => (m >> BigInt(i)) & 1n);
+
+export function ago(ts: bigint) {
+  const s = Math.max(0, Math.floor(Date.now() / 1000) - Number(ts));
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  return `${Math.floor(s / 3600)}h ago`;
+}
+
+export const usdc = (v: bigint) => Number(v / 10n ** 16n) / 100;
