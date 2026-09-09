@@ -178,6 +178,18 @@ contract AttenuationTest is Test {
 
     function test_NoOwnerPathToSeedTheRoot() public {
         Harness fresh = new Harness(device);
+        assertEq(fresh.owner(), address(this));
+
+        // The owner may authorize a registry, but a registry cannot grant beneath a root
+        // that was never mandated, and no owner-callable function writes a grant.
+        fresh.authorizeRegistry(address(this), ROOT);
+
+        vm.expectRevert("PARENT_DEAD");
+        fresh.grantTo(CHILD, agent, _child(1 ether, 1, 2));
+
+        vm.expectRevert("NOT_GRANTED");
+        fresh.setRootAgent(ROOT, agent);
+
         assertEq(fresh.grantOf(ROOT).epoch, 0);
     }
 }

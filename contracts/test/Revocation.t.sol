@@ -106,7 +106,9 @@ contract RevocationTest is Test {
         assertFalse(store.isLive(11));
         assertFalse(store.isLive(23));
 
-        assertEq(gSmall, gLarge, "revoke gas must not depend on subtree size");
+        // Tolerance far below the cost of touching one extra node, so any per-descendant
+        // work would fail this even though compiler noise will not.
+        assertApproxEqAbs(gSmall, gLarge, 100, "revoke gas must not depend on subtree size");
         emit log_named_uint("revoke gas (1 descendant)", gSmall);
         emit log_named_uint("revoke gas (3 descendants)", gLarge);
     }
