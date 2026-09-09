@@ -12,7 +12,9 @@ runs = 10000
 
 [invariant]
 runs = 256
-depth = 32
+# Deep enough that a run can actually build a multi-level tree before it starts
+# revoking and reclaiming it; at depth 32 most runs never got past two nodes.
+depth = 96
 fail_on_revert = false
 
 [rpc_endpoints]

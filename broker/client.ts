@@ -9,8 +9,20 @@ export interface Deployment {
   store: Address;
   caps: Address;
   executor: Address;
-  registry?: Address;
+  registry: Address;
+  factory: Address;
+  labels: Address;
+  usdc: Address;
+  pool: Address;
   device: Address;
+  revoker: Address;
+  rootAgent: Address;
+  root: string;
+  // Populated after the demo tree is seeded.
+  risk?: string;
+  exec?: string;
+  probe?: string;
+  riskRegistry?: Address;
 }
 
 export function loadDeployment(name = "local"): Deployment {

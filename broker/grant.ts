@@ -9,13 +9,12 @@ export interface GrantArgs {
   label: string;
   owner: Address;
   resolver: Address;
-  childRegistry: Address;
   grant: Grant;
 }
 
 const ZERO = "0x0000000000000000000000000000000000000000" as const;
 
-function tuple(g: Grant) {
+export function tuple(g: Grant) {
   return [
     g.capabilities, g.spendCap, g.spendRemaining, g.queryBudget, g.queryRemaining,
     g.expiry, g.maxDepth, g.readOnly, g.revoked, g.reclaimed,
@@ -27,16 +26,16 @@ export function newGrant(p: Partial<Grant> & Pick<Grant, "capabilities" | "spend
   return {
     spendRemaining: 0n, queryBudget: 0n, queryRemaining: 0n,
     maxDepth: 0, readOnly: false, revoked: false, reclaimed: false,
-    parent: "0x0", parentEpochAtGrant: 0n, epoch: 0n,
+    parent: 0n, parentEpochAtGrant: 0n, epoch: 0n,
     ...p,
-  } as Grant;
+  };
 }
 
 export function encodeRegisterWithGrant(a: GrantArgs) {
   return encodeFunctionData({
     abi: registryAbi,
     functionName: "registerWithGrant",
-    args: [a.label, a.owner, a.resolver, a.childRegistry, tuple(a.grant)],
+    args: [a.label, a.owner, a.resolver, tuple(a.grant)],
   });
 }
 
@@ -44,7 +43,7 @@ export function encodeRegisterOrLog(a: GrantArgs) {
   return encodeFunctionData({
     abi: registryAbi,
     functionName: "registerOrLog",
-    args: [a.label, a.owner, a.resolver, a.childRegistry, tuple(a.grant)],
+    args: [a.label, a.owner, a.resolver, tuple(a.grant)],
   });
 }
 
@@ -85,7 +84,7 @@ export async function simulateGrant(
       address: registry,
       abi: registryAbi,
       functionName: "registerWithGrant",
-      args: [a.label, a.owner, a.resolver, a.childRegistry, tuple(a.grant)],
+      args: [a.label, a.owner, a.resolver, tuple(a.grant)],
       account: caller,
     });
     return { ok: true };
@@ -128,7 +127,7 @@ export async function checkScope(
     spendRemaining: g.spendRemaining,
     queryRemaining: g.queryRemaining,
     expiry: g.expiry,
-    maxDepth: g.maxDepth,
+    maxDepth: Number(g.maxDepth),
     readOnly: g.readOnly,
     revoked: g.revoked,
     depth: Number(depth),
