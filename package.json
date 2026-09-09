@@ -4,13 +4,21 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "build": "forge build --root contracts",
+    "test": "forge test --root contracts",
+    "test:gas": "forge test --root contracts --gas-report",
+    "test:escalation": "forge test --root contracts --match-contract EscalationTest -vvv",
     "web": "next dev web -p 3000",
     "web:build": "next build web",
     "chain": "anvil",
     "deploy:local": "tsx scripts/deploy-local.ts",
+    "seed": "tsx scripts/seed-demo.ts",
     "smoke": "tsx scripts/smoke.ts",
-    "speculos": "./scripts/speculos.sh"
+    "speculos": "./scripts/speculos.sh",
+    "subgraph:codegen": "cd subgraph && graph codegen",
+    "subgraph:build": "cd subgraph && graph build"
   },
+  "packageManager": "npm@10.9.0",
   "dependencies": {
     "@ledgerhq/wallet-cli": "^2.1.0",
     "next": "^15.5.25",
