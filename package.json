@@ -3,10 +3,19 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "web": "next dev web -p 3000",
+    "web:build": "next build web",
+    "chain": "anvil",
+    "deploy:local": "tsx scripts/deploy-local.ts",
+    "smoke": "tsx scripts/smoke.ts",
+    "speculos": "./scripts/speculos.sh"
   },
   "dependencies": {
     "@ledgerhq/wallet-cli": "^2.1.0",
+    "next": "^15.5.25",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "viem": "^2.21.0"
   },
   "devDependencies": {
@@ -16,6 +25,8 @@
     "@ledgerhq/device-signer-kit-ethereum": "^1.18.0",
     "@ledgerhq/device-transport-kit-speculos": "^1.2.1",
     "@types/node": "^22.0.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
   }
