@@ -7,6 +7,8 @@
     "build": "forge build --root contracts",
     "test": "forge test --root contracts",
     "test:gas": "forge test --root contracts --gas-report",
+    "test:numbers": "forge test --root contracts --match-contract GasTest -vv",
+    "test:invariant": "forge test --root contracts --match-contract ConservationTest -vv",
     "test:escalation": "forge test --root contracts --match-contract EscalationTest -vvv",
     "web": "next dev web -p 3000",
     "web:build": "next build web",
