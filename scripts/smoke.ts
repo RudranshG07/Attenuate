@@ -5,24 +5,29 @@ import {
   encodeFunctionData,
   decodeEventLog,
   type Address,
-  type Hex,
+  type Chain,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { foundry } from "viem/chains";
 import { readFileSync } from "node:fs";
 import { loadDeployment } from "../broker/client.js";
+import { hackathonSepolia } from "../broker/chain.js";
 import { checkScope, decodeCapabilities, newGrant, simulateGrant } from "../broker/grant.js";
 import { Cap } from "../broker/types.js";
 
 const ANVIL_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" as const;
 const REVOKER_KEY = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d" as const;
 
+const DEPLOYMENT = process.env.DEPLOYMENT ?? "local";
 const account = privateKeyToAccount(ANVIL_KEY);
 const revokerAccount = privateKeyToAccount(REVOKER_KEY);
 const transport = http(process.env.RPC_URL ?? "http://127.0.0.1:8545");
-const wallet = createWalletClient({ account, chain: foundry, transport });
-const revoker = createWalletClient({ account: revokerAccount, chain: foundry, transport });
-const pub = createPublicClient({ chain: foundry, transport });
+
+function chainFor(chainId: number): Chain {
+  if (chainId === foundry.id) return foundry;
+  if (chainId === hackathonSepolia.id) return hackathonSepolia as unknown as Chain;
+  throw new Error(`unknown chain ${chainId}`);
+}
 
 function artifact(name: string) {
   return JSON.parse(readFileSync(`contracts/out/${name}.sol/${name}.json`, "utf8"));
@@ -34,26 +39,6 @@ function grantTuple(g: ReturnType<typeof newGrant>) {
     g.expiry, g.maxDepth, g.readOnly, g.revoked, g.reclaimed,
     g.parent, g.parentEpochAtGrant, g.epoch,
   ] as const;
-}
-
-async function mintLabel(registry: Address, label: string, grant: ReturnType<typeof newGrant>) {
-  const abi = artifact("AttenuatedSubregistry").abi;
-  const hash = await wallet.writeContract({
-    address: registry,
-    abi,
-    functionName: "registerWithGrant",
-    args: [label, account.address, account.address, grantTuple(grant)],
-  } as never);
-  const r = await pub.waitForTransactionReceipt({ hash });
-  for (const log of r.logs) {
-    try {
-      const e = decodeEventLog({ abi, data: log.data, topics: log.topics });
-      if (e.eventName === "Granted") return (e.args as { tokenId: bigint }).tokenId;
-    } catch {
-      // ignore
-    }
-  }
-  throw new Error(`no Granted event for ${label}`);
 }
 
 function ok(label: string, detail = "") {
@@ -68,10 +53,37 @@ function fail(label: string, detail: string): never {
 }
 
 async function main() {
-  const d = loadDeployment("local");
+  const d = loadDeployment(DEPLOYMENT);
   if (!d.registry || !d.exec || !d.usdc || !d.pool) {
-    fail("deploy", "deployments/local.json is incomplete — run npm run deploy:local");
+    fail("deploy", `deployments/${DEPLOYMENT}.json is incomplete — run the matching deploy script`);
   }
+
+  const chain = chainFor(d.chainId);
+  const wallet = createWalletClient({ account, chain, transport });
+  const revoker = createWalletClient({ account: revokerAccount, chain, transport });
+  const pub = createPublicClient({ chain, transport });
+
+  async function mintLabel(registry: Address, label: string, grant: ReturnType<typeof newGrant>) {
+    const abi = artifact("AttenuatedSubregistry").abi;
+    const hash = await wallet.writeContract({
+      address: registry,
+      abi,
+      functionName: "registerWithGrant",
+      args: [label, account.address, account.address, grantTuple(grant)],
+    } as never);
+    const r = await pub.waitForTransactionReceipt({ hash });
+    for (const log of r.logs) {
+      try {
+        const e = decodeEventLog({ abi, data: log.data, topics: log.topics });
+        if (e.eventName === "Granted") return (e.args as { tokenId: bigint }).tokenId;
+      } catch {
+        // ignore
+      }
+    }
+    throw new Error(`no Granted event for ${label}`);
+  }
+
+  console.log(`smoke against deployments/${DEPLOYMENT}.json (chainId ${d.chainId})\n`);
 
   const storeAbi = artifact("GrantStore").abi;
   const registryAbi = artifact("AttenuatedSubregistry").abi;
