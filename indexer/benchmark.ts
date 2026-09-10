@@ -1,3 +1,7 @@
+export interface BenchmarkConfig {
+  blocks: number;
+}
+
 export interface BenchmarkResult {
   blocksObserved: number;
   substreamsMedianLagMs: number;
