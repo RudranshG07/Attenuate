@@ -38,3 +38,6 @@ indexer/.cursor
 # next
 web/.next/
 next-env.d.ts
+!/AI-USE.md
+!/FEEDBACK.md
+!/prompts/

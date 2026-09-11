@@ -1,0 +1,145 @@
+import { parseUnits, type Address } from "viem";
+import { registryAbi } from "../broker/abi.js";
+import { walletClientFor } from "../broker/client.js";
+import { newGrant, simulateGrant, tuple } from "../broker/grant.js";
+import type { Grant } from "../broker/types.js";
+import { requireNode, snapshot, type Node, type Snapshot } from "./tree.js";
+
+export interface GrantInput {
+  capabilities: string;
+  spendCap: string;
+  queryBudget: string;
+  expiry: number;
+  maxDepth: number;
+  readOnly: boolean;
+}
+
+function toGrant(g: GrantInput): Grant {
+  return newGrant({
+    capabilities: BigInt(g.capabilities),
+    spendCap: BigInt(g.spendCap),
+    queryBudget: BigInt(g.queryBudget),
+    expiry: BigInt(g.expiry),
+    maxDepth: g.maxDepth,
+    readOnly: g.readOnly,
+  });
+}
+
+const asUsdc = (v: bigint) => `${Number(v / 10n ** 16n) / 100}`;
+
+function describe(n: Node) {
+  return {
+    name: n.name,
+    live: n.live,
+    revoked: n.revoked,
+    capabilities: n.capabilities,
+    spendCap: asUsdc(n.spendCap),
+    spendRemaining: asUsdc(n.spendRemaining),
+    queryBudget: n.queryBudget.toString(),
+    queryRemaining: n.queryRemaining.toString(),
+    expiry: Number(n.expiry),
+    expiresInSeconds: Math.max(0, Number(n.expiry) - Math.floor(Date.now() / 1000)),
+    maxDepth: n.maxDepth,
+    readOnly: n.readOnly,
+    depth: n.depth,
+    canDelegate: n.capabilities.includes("delegate") && n.maxDepth > 0,
+    agent: n.agent,
+    node: n.node.toString(),
+  };
+}
+
+function brokerKey(): `0x${string}` {
+  const k = process.env.ATTENUATE_PRIVATE_KEY;
+  if (!k) throw new Error("ATTENUATE_PRIVATE_KEY is not set, so write tools are unavailable");
+  return k as `0x${string}`;
+}
+
+export async function simulate_grant(a: { parent: string; grant: GrantInput }) {
+  const s = await snapshot();
+  const p = requireNode(s, a.parent);
+  if (!p.registry) {
+    return { ok: false, reason: "NO_REGISTRY", detail: `${p.name} has no subregistry, so it cannot have children` };
+  }
+  const r = await simulateGrant(s.client, p.registry, p.agent, {
+    label: "simulated",
+    owner: p.agent,
+    resolver: p.agent,
+    grant: toGrant(a.grant),
+  });
+  return r.ok
+    ? { ok: true, parent: p.name, parentRemaining: asUsdc(p.spendRemaining) }
+    : { ok: false, reason: r.reason, field: r.field, parent: p.name, parentRemaining: asUsdc(p.spendRemaining) };
+}
+
+export async function check_scope(a: { name: string }) {
+  const s = await snapshot();
+  return describe(requireNode(s, a.name));
+}
+
+export async function get_delegation_tree(a: { root: string }) {
+  const s = await snapshot();
+  const r = requireNode(s, a.root);
+  const kids = (p: bigint): any[] =>
+    [...s.byNode.values()]
+      .filter((n) => n.parent === p)
+      .map((n) => ({ ...describe(n), children: kids(n.node) }));
+  return { ...describe(r), children: kids(r.node) };
+}
+
+export async function grant_capability(a: {
+  parent: string; label: string; owner: string; grant: GrantInput;
+}) {
+  const s = await snapshot();
+  const p = requireNode(s, a.parent);
+  if (!p.registry) throw new Error(`${p.name} has no subregistry`);
+
+  const pre = await simulate_grant({ parent: a.parent, grant: a.grant });
+  if (!pre.ok) return pre;
+
+  const w = walletClientFor(s.deployment, brokerKey());
+  const hash = await w.writeContract({
+    address: p.registry,
+    abi: registryAbi,
+    functionName: "registerWithGrant",
+    args: [a.label, a.owner as Address, a.owner as Address, tuple(toGrant(a.grant))],
+  });
+  await s.client.waitForTransactionReceipt({ hash });
+  return { ok: true, name: `${a.label}.${p.name}`, txHash: hash };
+}
+
+export async function revoke_agent(a: { name: string }) {
+  const s = await snapshot();
+  const n = requireNode(s, a.name);
+  const parent = s.byNode.get(n.parent.toString());
+  const registry = parent?.registry ?? s.deployment.registry;
+
+  const w = walletClientFor(s.deployment, brokerKey());
+  const hash = await w.writeContract({
+    address: s.deployment.store,
+    abi: (await import("../broker/abi.js")).grantStoreAbi,
+    functionName: "revoke",
+    args: [n.node],
+  });
+  await s.client.waitForTransactionReceipt({ hash });
+
+  const after = await snapshot();
+  const dead = [...after.byNode.values()].filter((x) => !x.live).length;
+  return { ok: true, name: n.name, txHash: hash, nodesNowDead: dead, registry };
+}
+
+export async function query_position(a: { name: string; protocol: string; account: string }) {
+  const s = await snapshot();
+  const n = requireNode(s, a.name);
+  if (!n.capabilities.includes("data.graph.read")) {
+    return { ok: false, reason: "CAP_MISSING", detail: `${n.name} does not hold data.graph.read` };
+  }
+  if (n.queryRemaining <= 0n) {
+    return { ok: false, reason: "OVER_QUERY_BUDGET", detail: `${n.name} has no query budget left` };
+  }
+  return {
+    ok: false,
+    reason: "NOT_CONNECTED",
+    detail: "Set GRAPH_STUDIO_API_KEY to read live position data through the Subgraph MCP.",
+    queryRemaining: n.queryRemaining.toString(),
+  };
+}
