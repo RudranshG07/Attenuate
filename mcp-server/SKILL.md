@@ -105,6 +105,10 @@ A grant without bit 7 cannot call `registerWithGrant` at all, so it is a leaf re
 ## Setup
 
 ```bash
+npm i @modelcontextprotocol/sdk
+```
+
+```bash
 npx @attenuate/mcp-server
 ```
 
@@ -125,6 +129,12 @@ npx @attenuate/mcp-server
 ```
 
 `ATTENUATE_PRIVATE_KEY` is the key of the agent acting as grantor. It is only ever used to sign the grant transaction; the sub-agents it creates never receive it.
+
+## Limitations
+
+- Grants support a single budget asset.
+- Metering currently covers flat function arguments only.
+- Reclaim is manual after revocation; unspent budget is not returned automatically.
 
 ## Tools
 
