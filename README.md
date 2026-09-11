@@ -69,10 +69,10 @@ cd contracts && forge build && forge test
 Local demo, four commands:
 
 ```bash
-npm run chain                     # anvil
-npm run deploy:local              # contracts + device-signed root mandate
-npx tsx scripts/seed-demo.ts      # a real three-level tree
-npm run web                       # localhost:3000
+npm run chain          # anvil
+npm run deploy:local   # contracts, device-signed root mandate, and a three-level tree
+npm run smoke          # end-to-end: grant, execute, refuse, revoke, reclaim
+npm run web            # localhost:3000
 ```
 
 Against a fork of real Sepolia, using the live ENSv2 LabelStore:

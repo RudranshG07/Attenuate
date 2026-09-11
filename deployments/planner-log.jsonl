@@ -1,0 +1,5 @@
+{"at":"2026-09-11T16:58:22.959Z","label":"repay-now","rationale":"test","capabilities":"4","spendCap":"10000000000000000000","maxDepth":0,"accepted":true,"reason":null,"txHash":null}
+{"at":"2026-09-11T16:58:22.982Z","label":"grab-all","rationale":"test","capabilities":"511","spendCap":"1000000000000000000","maxDepth":0,"accepted":false,"reason":"SCOPE_WIDENED","txHash":null}
+{"at":"2026-09-11T16:58:23.003Z","label":"big-budget","rationale":"test","capabilities":"4","spendCap":"999000000000000000000000","maxDepth":0,"accepted":false,"reason":"CAP_EXCEEDS_UNALLOCATED","txHash":null}
+{"at":"2026-09-11T16:58:23.023Z","label":"deep","rationale":"test","capabilities":"4","spendCap":"1000000000000000000","maxDepth":9,"accepted":false,"reason":"DEPTH_EXCEEDED","txHash":null}
+{"at":"2026-09-11T16:58:23.042Z","label":"read-only","rationale":"test","capabilities":"64","spendCap":"0","maxDepth":0,"accepted":true,"reason":null,"txHash":null}
