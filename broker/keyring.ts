@@ -66,3 +66,51 @@ export async function decrypt(ciphertext: string, o: RingOptions): Promise<strin
   const out = await exec(["ring", "decrypt", "--key", o.key], ciphertext, o);
   return out.slice(out.indexOf("\n") + 1).trim() || out.trim();
 }
+
+export interface ApprovalRequest {
+  name: string;
+  reason: string;
+  needed: bigint;
+  allowed: bigint;
+}
+
+/**
+ * Touchpoint 3. An attempt to exceed the mandate surfaces as a device signature
+ * prompt rather than a silent revert, so a human decides whether to widen the
+ * mandate instead of the agent quietly failing.
+ *
+ * The counterfactual is the demo: with the device connected this returns; with it
+ * unplugged it hangs, which is what makes the hardware load-bearing rather than
+ * decorative.
+ */
+export async function requestApproval(req: ApprovalRequest): Promise<boolean> {
+  const { signTypedData } = await import("./device.js");
+  const chainId = Number(process.env.ATTENUATE_CHAIN_ID ?? 31337);
+
+  try {
+    await signTypedData({
+      domain: { name: "Attenuate", version: "1", chainId },
+      types: {
+        Escalation: [
+          { name: "name", type: "string" },
+          { name: "reason", type: "string" },
+          { name: "needed", type: "uint256" },
+          { name: "allowed", type: "uint256" },
+        ],
+      },
+      primaryType: "Escalation",
+      message: {
+        name: req.name,
+        reason: req.reason,
+        needed: req.needed.toString(),
+        allowed: req.allowed.toString(),
+      },
+    });
+    return true;
+  } catch (e) {
+    // A rejection on the device is a decision, not a failure.
+    const m = e instanceof Error ? e.message : String(e);
+    if (/denied|rejected|refused/i.test(m)) return false;
+    throw e;
+  }
+}
