@@ -13,6 +13,7 @@ type Agent @entity(immutable: false) {
   maxDepth: Int!
   readOnly: Boolean!
   depth: Int!
+  subregistry: Bytes
   epoch: BigInt!
   revoked: Boolean!
   reclaimed: Boolean!
@@ -38,6 +39,7 @@ type Execution @entity(immutable: true) {
   id: ID!
   agent: Agent!
   capBit: Int!
+  queryCost: BigInt!
   target: Bytes!
   spend: BigInt!
   timestamp: BigInt!

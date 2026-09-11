@@ -3,6 +3,7 @@ import {
   Granted as GrantedEvent,
   QuerySpent as QuerySpentEvent,
   Reclaimed as ReclaimedEvent,
+  RegistryAuthorized as RegistryAuthorizedEvent,
   Revoked as RevokedEvent,
   RootInitialised as RootInitialisedEvent,
   Spent as SpentEvent,
@@ -51,6 +52,7 @@ function agent(id: BigInt): Agent {
     a.revoked = false;
     a.reclaimed = false;
     a.isRoot = false;
+    a.subregistry = null;
     a.createdAt = BigInt.zero();
   }
   return a!;
@@ -173,12 +175,19 @@ export function handleQuerySpent(e: QuerySpentEvent): void {
   a.save();
 }
 
+export function handleRegistryAuthorized(e: RegistryAuthorizedEvent): void {
+  const a = agent(e.params.node);
+  a.subregistry = e.params.registry;
+  a.save();
+}
+
 export function handleExecuted(e: ExecutedEvent): void {
   let x = new Execution(eventId(e));
   x.agent = e.params.node.toString();
   x.capBit = e.params.capBit;
   x.target = e.params.target;
   x.spend = e.params.spend;
+  x.queryCost = e.params.queryCost;
   x.timestamp = e.block.timestamp;
   x.txHash = e.transaction.hash;
   x.save();
