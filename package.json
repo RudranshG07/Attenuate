@@ -3,18 +3,39 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build": "forge build --root contracts",
+    "test": "forge test --root contracts",
+    "test:gas": "forge test --root contracts --gas-report",
+    "test:numbers": "forge test --root contracts --match-contract GasTest -vv",
+    "test:invariant": "forge test --root contracts --match-contract ConservationTest -vv",
+    "test:escalation": "forge test --root contracts --match-contract EscalationTest -vvv",
+    "web": "next dev web -p 3000",
+    "web:build": "next build web",
+    "chain": "anvil",
+    "deploy:local": "tsx scripts/deploy-local.ts",
+    "deploy:forge": "forge script --root contracts script/Deploy.s.sol:Deploy --rpc-url http://127.0.0.1:8545 --broadcast",
+    "seed": "tsx scripts/seed-demo.ts",
+    "smoke": "tsx scripts/smoke.ts",
+    "speculos": "./scripts/speculos.sh",
+    "subgraph:codegen": "cd subgraph && graph codegen",
+    "subgraph:build": "cd subgraph && graph build"
   },
+  "packageManager": "npm@10.9.0",
   "dependencies": {
     "@ledgerhq/wallet-cli": "^2.1.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "viem": "^2.21.0"
   },
   "devDependencies": {
+    "@graphprotocol/graph-cli": "^0.98.1",
+    "@graphprotocol/graph-ts": "^0.38.2",
     "@ledgerhq/device-management-kit": "^1.9.0",
     "@ledgerhq/device-signer-kit-ethereum": "^1.18.0",
     "@ledgerhq/device-transport-kit-speculos": "^1.2.1",
     "@types/node": "^22.0.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
   }

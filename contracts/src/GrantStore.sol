@@ -36,6 +36,7 @@ contract GrantStore is EIP712 {
     );
 
     uint256 public constant MAX_WALK = 8;
+    uint256 public constant CAP_DELEGATE = 1 << 7;
 
     address public owner;
     address public executor;
@@ -50,6 +51,8 @@ contract GrantStore is EIP712 {
 
     event RootInitialised(uint256 indexed node, Grant grant);
     event Granted(uint256 indexed parent, uint256 indexed child, Grant grant);
+    event RegistryAuthorized(address indexed registry, uint256 indexed node);
+    event RegistryDeauthorized(address indexed registry);
     event Revoked(uint256 indexed node, uint64 epoch);
     event Reclaimed(uint256 indexed node, uint256 indexed toAncestor, uint256 spend, uint256 query);
     event Spent(uint256 indexed node, uint256 amount);
@@ -90,6 +93,20 @@ contract GrantStore is EIP712 {
         require(node != 0, "BAD_NODE");
         isRegistry[registry] = true;
         nodeOf[registry] = node;
+        emit RegistryAuthorized(registry, node);
+    }
+
+    // The only way a delegation chain extends past the root. A registry may authorize the
+    // registry of a node it just granted, and nothing else, so no owner sits in the loop.
+    function authorizeChildRegistry(address registry, uint256 childNode) external {
+        require(isRegistry[msg.sender], "NOT_REGISTRY");
+        require(registry != address(0), "BAD_REGISTRY");
+        require(!isRegistry[registry], "REGISTRY_EXISTS");
+        require(grants[childNode].parent == nodeOf[msg.sender], "NOT_CHILD");
+        require(grants[childNode].capabilities & CAP_DELEGATE != 0, "CANNOT_DELEGATE");
+        isRegistry[registry] = true;
+        nodeOf[registry] = childNode;
+        emit RegistryAuthorized(registry, childNode);
     }
 
     function initRoot(RootMandate calldata m, bytes calldata sig) external {
@@ -126,6 +143,15 @@ contract GrantStore is EIP712 {
         agentOf[node] = agent;
     }
 
+    // Advisory: reverts with the same reason grantTo would, so a caller can refuse before
+    // doing expensive work. grantTo re-checks, and remains the only enforcement point.
+    function assertCanGrant(Grant calldata g) external view {
+        require(isRegistry[msg.sender], "NOT_REGISTRY");
+        uint256 parentNode = nodeOf[msg.sender];
+        require(isLive(parentNode), "PARENT_DEAD");
+        _assertAttenuated(grants[parentNode], g);
+    }
+
     function grantTo(uint256 childNode, address agent, Grant calldata g) external {
         require(isRegistry[msg.sender], "NOT_REGISTRY");
         require(childNode != 0, "BAD_NODE");
@@ -133,6 +159,7 @@ contract GrantStore is EIP712 {
         uint256 parentNode = nodeOf[msg.sender];
         require(isLive(parentNode), "PARENT_DEAD");
         require(grants[childNode].epoch == 0, "EXISTS");
+        require(g.expiry > block.timestamp, "EXPIRED_GRANT");
 
         Grant storage p = grants[parentNode];
         _assertAttenuated(p, g);
@@ -157,8 +184,19 @@ contract GrantStore is EIP712 {
         emit Granted(parentNode, childNode, c);
     }
 
+    function deauthorizeRegistry(address registry) external onlyOwner {
+        isRegistry[registry] = false;
+        nodeOf[registry] = 0;
+        emit RegistryDeauthorized(registry);
+    }
+
+    // A registry may revoke only the names it granted. A derived registry under a revoked
+    // node needs no cleanup: its parent stops being live, so it can no longer grant.
     function revoke(uint256 node) external {
-        require(isRegistry[msg.sender] || msg.sender == owner, "NOT_REVOKER");
+        require(
+            msg.sender == owner || (isRegistry[msg.sender] && grants[node].parent == nodeOf[msg.sender]),
+            "NOT_REVOKER"
+        );
         Grant storage g = grants[node];
         require(g.epoch != 0, "NOT_GRANTED");
         require(!g.revoked, "ALREADY_REVOKED");
@@ -210,7 +248,7 @@ contract GrantStore is EIP712 {
             Grant storage g = grants[cur];
             if (g.epoch == 0) return false;
             if (g.revoked) return false;
-            if (g.expiry < block.timestamp) return false;
+            if (block.timestamp >= g.expiry) return false;
             if (g.parent == 0) return true;
             if (g.parentEpochAtGrant != grants[g.parent].epoch) return false;
             cur = g.parent;

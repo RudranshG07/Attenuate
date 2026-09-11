@@ -1,9 +1,37 @@
 specVersion: 1.0.0
-description: Attenuate permission tree
-repository: TODO
+description: The Attenuate permission tree
 schema:
   file: ./schema.graphql
 dataSources:
+  - kind: ethereum/contract
+    name: GrantStore
+    network: sepolia
+    source:
+      address: "0x0000000000000000000000000000000000000000"
+      abi: GrantStore
+      startBlock: 0
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/mapping.ts
+      entities: [Agent, BudgetFlow, Stats]
+      abis:
+        - name: GrantStore
+          file: ../contracts/out/GrantStore.sol/GrantStore.json
+      eventHandlers:
+        - event: RootInitialised(indexed uint256,(uint256,uint256,uint256,uint256,uint256,uint64,uint16,bool,bool,bool,uint256,uint64,uint64))
+          handler: handleRootInitialised
+        - event: Granted(indexed uint256,indexed uint256,(uint256,uint256,uint256,uint256,uint256,uint64,uint16,bool,bool,bool,uint256,uint64,uint64))
+          handler: handleGranted
+        - event: Revoked(indexed uint256,uint64)
+          handler: handleRevoked
+        - event: Reclaimed(indexed uint256,indexed uint256,uint256,uint256)
+          handler: handleReclaimed
+        - event: Spent(indexed uint256,uint256)
+          handler: handleSpent
+        - event: QuerySpent(indexed uint256,uint256)
+          handler: handleQuerySpent
   - kind: ethereum/contract
     name: AttenuatedSubregistry
     network: sepolia
@@ -16,18 +44,14 @@ dataSources:
       apiVersion: 0.0.9
       language: wasm/assemblyscript
       file: ./src/mapping.ts
-      entities: [Agent, Escalation, BudgetFlow]
+      entities: [Agent, Escalation, Stats]
       abis:
         - name: AttenuatedSubregistry
           file: ../contracts/out/AttenuatedSubregistry.sol/AttenuatedSubregistry.json
       eventHandlers:
-        - event: Granted(indexed bytes32,indexed bytes32,string,address,(uint256,uint256,uint256,uint256,uint256,uint64,uint16,bool,bool,bool,bytes32,uint64,uint64))
-          handler: handleGranted
-        - event: Revoked(indexed bytes32,uint64)
-          handler: handleRevoked
-        - event: Reclaimed(indexed bytes32,indexed bytes32,uint256,uint256)
-          handler: handleReclaimed
-        - event: EscalationBlocked(indexed bytes32,indexed address,string,(uint256,uint256,uint256,uint256,uint256,uint64,uint16,bool,bool,bool,bytes32,uint64,uint64),string,uint256)
+        - event: Granted(indexed uint256,string,address,(uint256,uint256,uint256,uint256,uint256,uint64,uint16,bool,bool,bool,uint256,uint64,uint64))
+          handler: handleNamed
+        - event: EscalationBlocked(indexed address,string,(uint256,uint256,uint256,uint256,uint256,uint64,uint16,bool,bool,bool,uint256,uint64,uint64),string,uint256)
           handler: handleEscalationBlocked
   - kind: ethereum/contract
     name: Executor
@@ -41,10 +65,10 @@ dataSources:
       apiVersion: 0.0.9
       language: wasm/assemblyscript
       file: ./src/mapping.ts
-      entities: [Agent, BudgetFlow]
+      entities: [Agent, Execution, Stats]
       abis:
         - name: Executor
           file: ../contracts/out/Executor.sol/Executor.json
       eventHandlers:
-        - event: Executed(indexed bytes32,indexed uint8,address,uint256)
+        - event: Executed(indexed uint256,indexed uint8,address,uint256)
           handler: handleExecuted

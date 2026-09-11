@@ -1,6 +1,7 @@
-type Agent @entity {
+type Agent @entity(immutable: false) {
   id: ID!
-  name: String!
+  label: String
+  owner: Bytes
   parent: Agent
   children: [Agent!]! @derivedFrom(field: "parent")
   capabilities: BigInt!
@@ -9,29 +10,57 @@ type Agent @entity {
   queryBudget: BigInt!
   queryRemaining: BigInt!
   expiry: BigInt!
+  maxDepth: Int!
+  readOnly: Boolean!
   depth: Int!
   epoch: BigInt!
   revoked: Boolean!
   reclaimed: Boolean!
+  isRoot: Boolean!
   createdAt: BigInt!
+  executions: [Execution!]! @derivedFrom(field: "agent")
 }
 
-type Escalation @entity {
+type Escalation @entity(immutable: true) {
   id: ID!
-  parent: Agent!
   attemptedBy: Bytes!
   label: String!
   reason: String!
-  proposedBy: String!
+  proposedCapabilities: BigInt!
+  proposedSpendCap: BigInt!
+  proposedExpiry: BigInt!
   blockNumber: BigInt!
   timestamp: BigInt!
+  txHash: Bytes!
 }
 
-type BudgetFlow @entity {
+type Execution @entity(immutable: true) {
   id: ID!
-  from: Agent!
+  agent: Agent!
+  capBit: Int!
+  target: Bytes!
+  spend: BigInt!
+  timestamp: BigInt!
+  txHash: Bytes!
+}
+
+type BudgetFlow @entity(immutable: true) {
+  id: ID!
+  from: Agent
   to: Agent
   amount: BigInt!
+  queryAmount: BigInt!
   kind: String!
   timestamp: BigInt!
+  txHash: Bytes!
+}
+
+type Stats @entity(immutable: false) {
+  id: ID!
+  agentsGranted: BigInt!
+  agentsRevoked: BigInt!
+  escalationsBlocked: BigInt!
+  executions: BigInt!
+  totalSpent: BigInt!
+  maxDepthSeen: Int!
 }
