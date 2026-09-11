@@ -28,6 +28,8 @@
     "@anthropic-ai/sdk": "^0.125.0",
     "@ledgerhq/wallet-cli": "^2.1.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "@substreams/core": "^0.17.0",
+    "@substreams/manifest": "^0.16.0",
     "next": "^15.5.25",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
