@@ -39,6 +39,7 @@ indexer/.cursor
 web/.next/
 next-env.d.ts
 !/AI-USE.md
+!/PARTNERS.md
 !/FEEDBACK.md
 !/prompts/
 !/prompts/*.md

@@ -166,7 +166,35 @@ point is that a human approves a legible mandate, that is a real gap. A document
 way to supply local clear-signing descriptors for a custom domain would matter to us
 more than almost anything else in the stack.
 
-## Open questions
+## Open questions, now answered
 
-- **Headless decryption on a host with no USB port.** The docs describe `WALLET_PASS` injected from the OS keychain, which covers CI on a machine that has already been enrolled. It is not yet clear to us whether a *fresh* VPS can be enrolled into an existing trustchain with the device attached elsewhere. This is the second ask in the track brief and the part we most want to build. Findings to follow.
-- **Speculos.** No emulator path is documented for either the Key Ring or the signer kit. For teams without hardware this is the difference between entering the track and not.
+**Headless enrolment on a host with no USB port.** This is the track's second ask and
+the one we most wanted to build. `ring init` needs a device on the machine, so a VPS
+can never be a trustchain member, and the `WALLET_PASS` pattern only covers a machine
+that is already enrolled.
+
+What we built instead of moving the ring: the ring stays on the operator's machine,
+the remote host generates an ephemeral X25519 keypair, and the device signs an
+EIP-712 approval over an 8-character fingerprint of that key which the operator reads
+off the device screen. Secret releases are then decrypted from the ring on the
+operator's machine and re-encrypted to the approved key. The plaintext is never on
+the wire, the ring never leaves the desk, and the VPS holds a short-lived capability
+rather than a key.
+
+`keyring-remote/enroll.ts`. Tested for the three failures that matter: a different
+host cannot open a sealed secret, an expired secret is refused, and a request whose
+fingerprint does not match its own public key is rejected before the device is asked.
+
+**Suggestion.** A documented enrolment story for hosts without a device is the single
+biggest gap we hit. The primitives are all there; what is missing is a page saying
+"here is how a CI runner or a VPS participates without becoming a member". We would
+have built on it rather than designing it.
+
+## Still open
+
+**Speculos and the Key Ring together.** The DMK transport gives us signing on an
+emulator, which covers the mandate and the escalation prompts. `wallet-cli ring`
+itself still wants real hardware for `init`, so the encrypt/decrypt half of our
+integration is written against the documented CLI contract but exercised only with a
+device attached. Confirming whether the trustchain layer can be driven against
+Speculos directly would close that gap.
