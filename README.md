@@ -107,6 +107,7 @@ $ cast call 0x983c610f91Faa00949943a132650167bf41F440A \
 | AttenuatedSubregistry | `0x2f843fbf91b9f26909f171379db47596c83b10dd` |
 | Executor | `0x540a26dfcadf9b93225b7d0d61f6ac2646674ac3` |
 | Deployed at block | `11690689` |
+| Subgraph | [`atte/v0.0.1`](https://api.studio.thegraph.com/query/1760226/atte/v0.0.1) |
 
 The published tree, read straight off the resolver:
 

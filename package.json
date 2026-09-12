@@ -24,7 +24,8 @@
     "speculos": "./scripts/speculos.sh",
     "speculos:approve": "tsx scripts/speculos-approve.ts",
     "subgraph:codegen": "cd subgraph && graph codegen",
-    "subgraph:build": "cd subgraph && graph build"
+    "subgraph:build": "cd subgraph && graph build",
+    "subgraph:deploy": "cd subgraph && graph auth \"$GRAPH_STUDIO_API_KEY\" && graph deploy ${SUBGRAPH_SLUG:-atte}"
   },
   "packageManager": "npm@10.9.0",
   "dependencies": {

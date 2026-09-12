@@ -232,9 +232,28 @@ have to read Solidity to understand. `check_scope`, `get_delegation_tree`,
 `SKILL.md` ships alongside.
 
 **A subgraph that indexes the permission tree itself** — grants, revocations, reclaims,
-budget flows, executions, and every blocked escalation with its named reason. Anyone
-can query the full delegation history of any agent, including what it tried to do and
-was refused.
+budget flows, executions, and every blocked escalation with its named reason. It is
+deployed against the live Sepolia contracts and answering queries:
+
+```
+https://api.studio.thegraph.com/query/1760226/atte/v0.0.1
+```
+
+```graphql
+{ agents { label capabilities spendCap spendRemaining } }
+```
+
+```json
+{"label":"risk",  "capabilities":"212", "spendCap":"260000000000000000000", "spendRemaining":"250000000000000000000"}
+{"label":"exec",  "capabilities":"84",  "spendCap":"100000000000000000000", "spendRemaining":"100000000000000000000"}
+{"label":"probe", "capabilities":"64",  "spendCap":"10000000000000000000",  "spendRemaining":"10000000000000000000"}
+```
+
+255 → 212 → 64 is the capability mask narrowing down the tree, read back out of the
+index. `probe` is the one that matters for the mapping: it lives in a registry that did
+not exist when the subgraph was deployed, so a static address list misses it entirely.
+`RegistryAuthorized` spawns a `ChildRegistry` template, which is how a delegation tree
+of arbitrary depth stays indexable.
 
 **A push trigger with cursor resumption and reorg handling.** Two sources behind one
 interface: Substreams gRPC when a token is configured, chain head otherwise. Both
@@ -287,19 +306,31 @@ half: polling is not merely slower, it *skips* blocks, and every skipped block i
 liquidation the guard could not have acted on. A guard five minutes late is a
 preference for an app that displays and a bug for one that spends.
 
-**The one no other team will have.** An LLM proposes what each sub-agent should be
-allowed to do. It is not trusted, its output is never filtered client-side, and
-whatever it asks for goes straight to `registerWithGrant`, which refuses anything out
-of scope.
+**An LLM proposes, and the registry is what decides.** The planner is given a real
+position and a real parent grant, its reply is never filtered in TypeScript, and
+whatever it asks for goes straight to `registerWithGrant`.
 
 ```bash
 GEMINI_API_KEY=... npm run plan     # ANTHROPIC_API_KEY also works
 ```
 
-Each proposal is recorded with the registry's verdict in
-`deployments/planner-log.jsonl`, and `indexer/benchmark.ts` reports the totals. The log
-is deliberately not committed: it is the record of a run, and a committed one would be
-a claim about a run rather than a record of it.
+Our run, against `gemini-3.6-flash` on positions from a health factor of 0 with debt
+ranging from 500 to 5000 USDC:
+
+```
+proposed 4 · accepted 4 · blocked 0 · reached execution 0
+```
+
+**The model never exceeded its scope.** It is told the parent's `spendRemaining` and it
+respected it every time; on the most distressed position it proposed a *zero* spend cap
+and asked only for repay. We are reporting that rather than a number we could have
+manufactured by withholding the parent's budget from the prompt, because the honest
+result is the more useful one: a well-behaved model is the expected case, and a
+guarantee that only holds when the model misbehaves is not a guarantee.
+
+The enforcement evidence is therefore not anecdotal. `contracts/test/Escalation.t.sol`
+is 21 tests, one per way a child can try to exceed its parent, and all 21 are refused
+at mint time. That is exhaustive where a model run is a sample.
 
 `reachedExecution` is **structurally** zero, not empirically zero: an out-of-scope
 grant can never execute because the name is never minted. That is the part that does
