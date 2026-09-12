@@ -166,6 +166,42 @@ point is that a human approves a legible mandate, that is a real gap. A document
 way to supply local clear-signing descriptors for a custom domain would matter to us
 more than almost anything else in the stack.
 
+### 7. A DMK session signs exactly once, and the second attempt looks like a device fault
+
+`signTypedData` succeeds the first time and then fails for the rest of the process:
+
+```
+UnknownDeviceExchangeError { message: "UnknownError", errorCode: "6980" }
+```
+
+0x6980 reads as a device-side condition, so the first day went into the emulator:
+checking that the app was on its ready screen, that blind signing was still enabled,
+that the menu had not been left open. All of that was fine, and the device visibly
+showed the *second* prompt before the error arrived, which ruled the device out
+entirely.
+
+The cause is the session, not the device. Rebuilding the signer is not enough and
+neither is dropping the cached promise, because the previous session still holds the
+transport. It only works if the old session is explicitly disconnected:
+
+```ts
+await dmk.disconnect({ sessionId });   // required before the next connect()
+```
+
+`getAddress` opens a session too, so a broker that reads the address between two
+signatures hits the same wall with a different error, `InvalidStatusWordError`, which
+gives no hint that it shares a cause with 6980.
+
+Two things would have saved most of a day: naming the error after the session rather
+than the exchange, and saying in the signer docs that a session is single-use.
+
+### 8. A declined signature is reported as an error condition
+
+Rejecting on device raises `EthAppCommandError 0x6985 "Condition not satisfied"`.
+A refusal is the feature working, not a fault, and the message reads like a fault, so
+the natural `catch` treats a deliberate human decision as a crash. We match on the
+code now, but something like `UserRejectedError` would make the distinction obvious.
+
 ## Open questions, now answered
 
 **Headless enrolment on a host with no USB port.** This is the track's second ask and

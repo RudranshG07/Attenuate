@@ -6,6 +6,7 @@
     "typecheck": "tsc --noEmit",
     "build": "forge build --root contracts",
     "test": "forge test --root contracts",
+    "test:keyring": "tsx --test keyring-remote/*.test.ts",
     "test:gas": "forge test --root contracts --gas-report",
     "test:numbers": "forge test --root contracts --match-contract GasTest -vv",
     "test:invariant": "forge test --root contracts --match-contract ConservationTest -vv",
@@ -20,6 +21,7 @@
     "smoke": "tsx scripts/smoke.ts",
     "smoke:fork": "DEPLOYMENT=fork tsx scripts/smoke.ts",
     "speculos": "./scripts/speculos.sh",
+    "speculos:approve": "tsx scripts/speculos-approve.ts",
     "subgraph:codegen": "cd subgraph && graph codegen",
     "subgraph:build": "cd subgraph && graph build"
   },

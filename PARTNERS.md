@@ -16,21 +16,30 @@ no owner function, no admin path and no seed method that bypasses it** — a tes
 asserts that a freshly deployed `GrantStore` has an empty root. Unplug the device and
 nothing in the tree can be created.
 
-Three device touchpoints, all implemented:
+Three device touchpoints. One and three run end to end on Speculos with no hardware;
+the second needs a ring, and `wallet-cli ring init` says *device required*, which is
+the limitation the next section is about.
 
 **1. The root mandate.** One EIP-712 signature establishes the capability bitmask,
 spend cap, query budget, expiry and delegation depth for the entire tree. Everything
 below is a strict subset, enforced in the registry contract. `broker/mandate.ts`.
 
 **2. Scoped secret release.** `wallet-cli ring encrypt/decrypt` seals a short-lived,
-scope-bound token for a sub-agent. The sub-agent receives a capability, never a key.
-This is the track brief's own sentence — *a broker hands out scoped capabilities,
-never the API key* — and it is what `broker/secrets.ts` does.
+scope-bound token for a sub-agent, so the sub-agent receives a capability and never a
+key — the track brief's own sentence. `broker/secrets.ts` is written against the CLI,
+but we cannot show it running: a ring has to be created by `ring init`, which requires
+a physical device we do not have. What we *can* show is the part that does not need
+one, below.
 
-**3. Escalation as a prompt, not a revert.** When an agent needs more than its mandate
-allows, `requestApproval` raises an EIP-712 `Escalation` on the device showing the
-name, the reason, what was needed and what the mandate permits. A rejection on the
-device is a decision the code understands, not an error.
+**3. Escalation as a prompt, not a revert.** When a grant is refused for running out
+of unallocated cap or budget, `grant_capability` raises an EIP-712 `Escalation` on the
+device showing the name, the reason, what was needed and what the mandate permits. A
+rejection is a decision the code understands: the device reports it as `0x6985
+"Condition not satisfied"`, and `requestApproval` returns `false` rather than throwing.
+
+Only quantitative refusals escalate. Asking for a capability the parent never held is
+structural, and no signature widens it, because the registry would refuse the mint
+either way.
 
 ## The second ask: Key Ring on a host with no USB port
 
@@ -48,16 +57,26 @@ re-encrypted to the approved key, so the plaintext is never on the wire and the 
 never leaves the desk. The VPS ends up holding a short-lived capability rather than a
 key — the same property the on-chain grants have.
 
-`keyring-remote/enroll.ts`, with the three failure modes tested: a different host
-cannot open a sealed secret, an expired secret is refused, and a request whose
-fingerprint does not match its own public key is rejected before the device is ever
-asked.
+`keyring-remote/enroll.ts`, with the three failure modes tested in
+`keyring-remote/enroll.test.ts` (`npm run test:keyring`): a different host cannot open
+a sealed secret, an expired secret is refused, and a request whose fingerprint does not
+match its own public key is rejected before the device module is even loaded.
 
 ## Developing without hardware
 
 We had no physical device, and four teams asked in Discord over four days whether
 Speculos was acceptable with no answer. It works, and the recipe is in
-`scripts/speculos.sh` as one command.
+`scripts/speculos.sh` as one command. `scripts/speculos-approve.ts` drives the
+prompts, so the mandate and the escalation can both be exercised in CI:
+
+```bash
+npm run speculos
+npm run speculos:approve &     # answers the prompts
+```
+
+Two things had to be fixed to get there, both written up in `FEEDBACK.md`: a DMK
+session signs exactly once and must be explicitly disconnected before the next one,
+and a declined signature arrives as an error code rather than a rejection.
 
 The key finding is that `@ledgerhq/device-transport-kit-speculos` is a **first-class
 DMK transport**, distinct from the `@ledgerhq/speculos-transport` test helper people

@@ -3,6 +3,7 @@ import { registryAbi } from "../broker/abi.js";
 import { walletClientFor } from "../broker/client.js";
 import { newGrant, simulateGrant, tuple } from "../broker/grant.js";
 import type { Grant } from "../broker/types.js";
+import { deviceAvailable, requestApproval } from "../broker/keyring.js";
 import { requireNode, snapshot, type Node, type Snapshot } from "./tree.js";
 
 export interface GrantInput {
@@ -86,6 +87,42 @@ export async function get_delegation_tree(a: { root: string }) {
   return { ...describe(r), children: kids(r.node) };
 }
 
+// A grant can be refused for two different kinds of reason, and only one of them is
+// a question for a human. Running out of unallocated cap or budget is a spending
+// decision the operator can make on the device. Asking for a capability the parent
+// never held, or an expiry past its own, is structural: no signature widens it,
+// because the registry would refuse the mint either way.
+const ESCALATABLE = new Set(["CAP_EXCEEDS_UNALLOCATED", "BUDGET_EXCEEDS_UNALLOCATED"]);
+
+async function escalate(
+  a: { parent: string; label: string; grant: GrantInput },
+  parent: Node,
+  refusal: { ok: boolean; reason?: string; field?: string } & Record<string, unknown>,
+) {
+  if (!refusal.reason || !ESCALATABLE.has(refusal.reason) || !deviceAvailable()) {
+    return refusal;
+  }
+
+  const needed = refusal.reason === "CAP_EXCEEDS_UNALLOCATED"
+    ? parseUnits(String(a.grant.spendCap ?? 0), 18)
+    : BigInt(a.grant.queryBudget ?? 0);
+  const allowed = refusal.reason === "CAP_EXCEEDS_UNALLOCATED"
+    ? parent.spendRemaining
+    : parent.queryRemaining;
+
+  const approved = await requestApproval({
+    name: `${a.label}.${parent.name}`,
+    reason: refusal.reason,
+    needed,
+    allowed,
+  });
+
+  // Approval is a human saying the tree should be widened, not a bypass: the parent
+  // still holds what it holds, so the mint stays refused until someone re-grants it
+  // headroom from above.
+  return { ...refusal, escalated: true, approvedOnDevice: approved };
+}
+
 export async function grant_capability(a: {
   parent: string; label: string; owner: string; grant: GrantInput;
 }) {
@@ -94,7 +131,7 @@ export async function grant_capability(a: {
   if (!p.registry) throw new Error(`${p.name} has no subregistry`);
 
   const pre = await simulate_grant({ parent: a.parent, grant: a.grant });
-  if (!pre.ok) return pre;
+  if (!pre.ok) return escalate(a, p, pre);
 
   const w = walletClientFor(s.deployment, brokerKey());
   const hash = await w.writeContract({

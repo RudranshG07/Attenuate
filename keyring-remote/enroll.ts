@@ -102,12 +102,14 @@ export async function approveEnrollment(
   request: EnrollmentRequest,
   ttlSeconds = 86_400,
 ): Promise<EnrollmentApproval> {
-  const { getAddress, signTypedData } = await import("../broker/device.js");
-  const expiresAt = Math.floor(Date.now() / 1000) + ttlSeconds;
-
+  // Checked before the device module is even loaded: a request that does not match
+  // its own key is never worth waking the device for.
   if (fingerprintOf(request.publicKey) !== request.fingerprint) {
     throw new Error("FINGERPRINT_MISMATCH: the request does not match its own key");
   }
+
+  const { getAddress, signTypedData } = await import("../broker/device.js");
+  const expiresAt = Math.floor(Date.now() / 1000) + ttlSeconds;
 
   const signature = await signTypedData({
     domain: { name: "Attenuate", version: "1", chainId: Number(process.env.ATTENUATE_CHAIN_ID ?? 31337) },

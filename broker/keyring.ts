@@ -67,6 +67,15 @@ export async function decrypt(ciphertext: string, o: RingOptions): Promise<strin
   return out.slice(out.indexOf("\n") + 1).trim() || out.trim();
 }
 
+/**
+ * A device is reachable when Speculos is pointed at, or when a real one is attached
+ * and escalation is explicitly asked for. Without it, a refusal stays a refusal
+ * rather than hanging on a prompt nobody can answer.
+ */
+export function deviceAvailable(): boolean {
+  return Boolean(process.env.LEDGER_SPECULOS_URL) || process.env.ATTENUATE_ESCALATE === "1";
+}
+
 export interface ApprovalRequest {
   name: string;
   reason: string;
@@ -108,9 +117,11 @@ export async function requestApproval(req: ApprovalRequest): Promise<boolean> {
     });
     return true;
   } catch (e) {
-    // A rejection on the device is a decision, not a failure.
+    // A rejection on the device is a decision, not a failure. The Ethereum app
+    // reports a declined signature as 0x6985 "Condition not satisfied", which reads
+    // like a fault and is not one.
     const m = e instanceof Error ? e.message : String(e);
-    if (/denied|rejected|refused/i.test(m)) return false;
+    if (/denied|rejected|refused|6985|condition not satisfied/i.test(m)) return false;
     throw e;
   }
 }

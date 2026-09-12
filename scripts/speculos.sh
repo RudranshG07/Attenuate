@@ -32,8 +32,23 @@ press right   # App settings
 press both    # enter
 press both    # toggle Blind signing
 
-if screen | grep -q Enabled; then
+enabled=$(screen | grep -c Enabled || true)
+
+# Walk back out to the main screen. The settings list ends in a "Back" item, and an
+# APDU sent from the "Quit app" entry fails with 0x6980, so leaving the menu open is
+# not merely untidy.
+for _ in $(seq 12); do
+  screen | grep -q "^Back" && break
+  press right
+done
+press both
+for _ in $(seq 5); do
+  screen | grep -q "app is ready" && break
+  press left
+done
+
+if [ "$enabled" != "0" ] && screen | grep -q "app is ready"; then
   echo "speculos ready on $API, blind signing enabled"
 else
-  echo "warning: blind signing may not be enabled: $(screen)" >&2
+  echo "warning: not at the ready screen, or blind signing off: $(screen)" >&2
 fi
