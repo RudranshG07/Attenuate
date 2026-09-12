@@ -1,0 +1,26 @@
+{
+  "chainId": 11155111,
+  "live": true,
+  "name": "attenuate.eth",
+  "node": "0x9f4d1221b0efcdb0aaceac695f0fe1d86d602c9bbefbd6fa8a9d4e30aece1efa",
+  "resolver": "0xf4c2D7493dCA997Be6A841d2c504c3C314086f57",
+  "store": "0x62a3ca15a22993c7ce5b1113c2d6ceb4847ba7d2",
+  "usdc": "0x5ef913262e2a0fa83e2c05dd68b9ea60f7a4b341",
+  "pool": "0x2594efe063ea2353c3c82b081aee3f57407e9533",
+  "caps": "0x5c1a440629abe991ac628911de490c10bd613d96",
+  "executor": "0xf78ac2edf45dca2ab0e2eb4519df6a3286c2b933",
+  "factory": "0x48666f78172d6baf7d74aca3aea54314592e0293",
+  "registry": "0x8624cd95d41094d45b9a0e07a0bb230aa5c5ea51",
+  "deployer": "0xcB454baD0efa5d7422a639a7e83b2CEc88f27330",
+  "ensv2": {
+    "ethRegistry": "0x67b728a792e789a8978b30cf1b3b641f19354b43",
+    "ethRegistrar": "0xa4449a0dd2b83007553d9b1d28b583a46a805a30",
+    "rootRegistry": "0x11b5bfbe9078d826b1edbdd1cfc12f5828d9f50c",
+    "userRegistryImpl": "0x840fa461059862ea466a711e8c98c8de732061c0",
+    "permissionedResolverImpl": "0x7e4b2d59938930168024201752ee5503df402303",
+    "verifiableFactory": "0x118bc31a50d559f7015a8da26d54b3b030cdb70f",
+    "labelStore": "0xb03524289c16424f71802a1794c29c7bd1b9f577",
+    "universalResolverProxy": "0xeEeEEEeE14D718C2B47D9923Deab1335E144EeEe",
+    "mockUsdc": "0xd3322b29a7bdee707d1684676f149bf41aa3422f"
+  }
+}
