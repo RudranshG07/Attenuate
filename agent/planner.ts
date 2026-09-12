@@ -83,41 +83,88 @@ function describeParent(g: Grant) {
   ].join("\n");
 }
 
+function promptFor(position: PositionHealth, parentGrant: Grant) {
+  return [
+    "Position:",
+    `  healthFactor: ${position.healthFactor}`,
+    `  collateralUsd: ${position.collateralUsd}`,
+    `  debtUsd: ${position.debtUsd}`,
+    `  liquidationThreshold: ${position.liquidationThreshold}`,
+    "",
+    "Parent grant:",
+    describeParent(parentGrant),
+    "",
+    "Propose the narrowest child grant that addresses this risk.",
+  ].join("\n");
+}
+
+async function askClaude(prompt: string): Promise<string> {
+  const client = new Anthropic();
+  const response = await client.messages.create({
+    model: process.env.PLANNER_MODEL ?? "claude-opus-5",
+    max_tokens: 4096,
+    thinking: { type: "adaptive" },
+    system: PLANNER_SYSTEM_PROMPT,
+    output_config: { format: { type: "json_schema", schema: GRANT_SCHEMA } },
+    messages: [{ role: "user", content: prompt }],
+  });
+  const text = response.content.find((b) => b.type === "text");
+  if (!text || text.type !== "text") throw new Error("planner returned no text block");
+  return text.text;
+}
+
+// Gemini accepts a narrower schema dialect than Claude: no additionalProperties, no
+// numeric bounds. Stripping them keeps one schema as the single source of truth
+// instead of two that can drift apart.
+function geminiSchema(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(geminiSchema);
+  if (node && typeof node === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+      if (k === "additionalProperties" || k === "minimum" || k === "maximum") continue;
+      out[k] = geminiSchema(v);
+    }
+    return out;
+  }
+  return node;
+}
+
+async function askGemini(prompt: string): Promise<string> {
+  const model = process.env.PLANNER_MODEL ?? "gemini-2.5-flash";
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": process.env.GEMINI_API_KEY as string,
+    },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: PLANNER_SYSTEM_PROMPT }] },
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: geminiSchema(GRANT_SCHEMA),
+      },
+    }),
+  });
+  if (!res.ok) throw new Error(`gemini ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  const j = (await res.json()) as {
+    candidates?: { content?: { parts?: { text?: string }[] } }[];
+  };
+  const text = j.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("");
+  if (!text) throw new Error("planner returned no text block");
+  return text;
+}
+
 export async function proposeChildGrant(
   position: PositionHealth,
   parentNode: bigint,
   parentGrant: Grant,
 ): Promise<Proposal> {
-  const client = new Anthropic();
+  const prompt = promptFor(position, parentGrant);
+  const body = process.env.GEMINI_API_KEY ? await askGemini(prompt) : await askClaude(prompt);
 
-  const response = await client.messages.create({
-    model: "claude-opus-5",
-    max_tokens: 4096,
-    thinking: { type: "adaptive" },
-    system: PLANNER_SYSTEM_PROMPT,
-    output_config: { format: { type: "json_schema", schema: GRANT_SCHEMA } },
-    messages: [
-      {
-        role: "user",
-        content: [
-          "Position:",
-          `  healthFactor: ${position.healthFactor}`,
-          `  collateralUsd: ${position.collateralUsd}`,
-          `  debtUsd: ${position.debtUsd}`,
-          `  liquidationThreshold: ${position.liquidationThreshold}`,
-          "",
-          "Parent grant:",
-          describeParent(parentGrant),
-          "",
-          "Propose the narrowest child grant that addresses this risk.",
-        ].join("\n"),
-      },
-    ],
-  });
-
-  const text = response.content.find((b) => b.type === "text");
-  if (!text || text.type !== "text") throw new Error("planner returned no text block");
-  const raw = JSON.parse(text.text) as {
+  const raw = JSON.parse(body) as {
     label: string;
     rationale: string;
     grant: Record<string, string | number | boolean>;

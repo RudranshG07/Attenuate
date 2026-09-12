@@ -19,6 +19,7 @@
     "deploy:fork": "tsx scripts/deploy-fork.ts",
     "deploy:forge": "forge script --root contracts script/Deploy.s.sol:Deploy --rpc-url http://127.0.0.1:8545 --broadcast",
     "smoke": "tsx scripts/smoke.ts",
+    "plan": "tsx scripts/plan.ts",
     "smoke:fork": "DEPLOYMENT=fork tsx scripts/smoke.ts",
     "speculos": "./scripts/speculos.sh",
     "speculos:approve": "tsx scripts/speculos-approve.ts",

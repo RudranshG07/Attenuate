@@ -269,11 +269,17 @@ The Lisbon winner took the track on a number, so we brought two.
 **Push versus polling**, both running against the same chain at the same time so the
 only variable is how each learns a block exists:
 
+```bash
+anvil --block-time 1 &            # the poller needs blocks it can miss
+npm run deploy:local
+BENCH_BLOCKS=25 npx tsx indexer/benchmark.ts
 ```
-blocks observed          25
-push median lag           0 ms
-polling median lag      577 ms
-blocks polling never saw  18
+
+```
+blocks observed            25
+push median lag             0 ms
+polling median lag        593 ms
+blocks polling never saw   18
 ```
 
 Eighteen of twenty-five blocks the poller never observed at all. That is the stronger
@@ -282,16 +288,22 @@ liquidation the guard could not have acted on. A guard five minutes late is a
 preference for an app that displays and a bug for one that spends.
 
 **The one no other team will have.** An LLM proposes what each sub-agent should be
-allowed to do. It is not trusted, its output is never filtered client-side, and the
-registry refuses anything out of scope:
+allowed to do. It is not trusted, its output is never filtered client-side, and
+whatever it asks for goes straight to `registerWithGrant`, which refuses anything out
+of scope.
 
+```bash
+GEMINI_API_KEY=... npm run plan     # ANTHROPIC_API_KEY also works
 ```
-proposed 5 · accepted 2 · blocked 3 · reached execution 0
-blocked by reason: SCOPE_WIDENED 1, CAP_EXCEEDS_UNALLOCATED 1, DEPTH_EXCEEDED 1
-```
+
+Each proposal is recorded with the registry's verdict in
+`deployments/planner-log.jsonl`, and `indexer/benchmark.ts` reports the totals. The log
+is deliberately not committed: it is the record of a run, and a committed one would be
+a claim about a run rather than a record of it.
 
 `reachedExecution` is **structurally** zero, not empirically zero: an out-of-scope
-grant can never execute because the name is never minted.
+grant can never execute because the name is never minted. That is the part that does
+not depend on which model proposed, or on how well it behaved on the day.
 
 The design line worth stating: structured output constrains the *shape* of the model's
 reply so it always parses, and deliberately **not** the scope. Filtering the proposal
