@@ -14,6 +14,7 @@ import {
 } from "../generated/AttenuatedSubregistry/AttenuatedSubregistry";
 import { Executed as ExecutedEvent } from "../generated/Executor/Executor";
 import { Agent, BudgetFlow, Escalation, Execution, Stats } from "../generated/schema";
+import { ChildRegistry } from "../generated/templates";
 
 const STATS = "global";
 
@@ -179,6 +180,12 @@ export function handleRegistryAuthorized(e: RegistryAuthorizedEvent): void {
   const a = agent(e.params.node);
   a.subregistry = e.params.registry;
   a.save();
+
+  // The root registry is a static data source. Every registry below it is deployed at
+  // grant time, so the store authorising one is the first block we can index it from.
+  if (!a.isRoot) {
+    ChildRegistry.create(e.params.registry);
+  }
 }
 
 export function handleExecuted(e: ExecutedEvent): void {

@@ -18,6 +18,8 @@ export interface Deployment {
   revoker: Address;
   rootAgent: Address;
   root: string;
+  // Block the deployment landed in; log scans start here.
+  startBlock?: number;
   // Populated after the demo tree is seeded.
   risk?: string;
   exec?: string;

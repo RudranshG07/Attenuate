@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { createPublicClient, createWalletClient, http, parseAbiItem } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { foundry } from "viem/chains";
+import { hackathonSepolia } from "../../../broker/chain";
 
 export const GRANT_TUPLE =
   "(uint256 capabilities,uint256 spendCap,uint256 spendRemaining,uint256 queryBudget,uint256 queryRemaining,uint64 expiry,uint16 maxDepth,bool readOnly,bool revoked,bool reclaimed,uint256 parent,uint64 parentEpochAtGrant,uint64 epoch)";
@@ -13,15 +14,30 @@ export const events = {
   blocked: parseAbiItem(`event EscalationBlocked(address indexed attemptedBy, string label, ${GRANT_TUPLE} proposed, string reason, uint256 timestamp)`),
   revoked: parseAbiItem("event Revoked(uint256 indexed node, uint64 epoch)"),
   reclaimed: parseAbiItem("event Reclaimed(uint256 indexed node, uint256 indexed toAncestor, uint256 spend, uint256 query)"),
-  executed: parseAbiItem("event Executed(uint256 indexed node, uint8 indexed capBit, address target, uint256 spend)"),
+  registryAuthorized: parseAbiItem("event RegistryAuthorized(address indexed registry, uint256 indexed node)"),
+  executed: parseAbiItem("event Executed(uint256 indexed node, uint8 indexed capBit, address target, uint256 spend, uint32 queryCost)"),
 };
 
 export function root() {
   return process.cwd().replace(/\/web$/, "");
 }
 
+// Defaults to the anvil deployment so `npm run dev` keeps working with no env set.
+// ATTENUATE_DEPLOYMENT=sepolia points the same screen at the live tree.
+const TARGET = process.env.ATTENUATE_DEPLOYMENT ?? "local";
+
 export function deployment() {
-  return JSON.parse(readFileSync(`${root()}/deployments/local.json`, "utf8"));
+  return JSON.parse(readFileSync(`${root()}/deployments/${TARGET}.json`, "utf8"));
+}
+
+function chain() {
+  return TARGET === "local" ? foundry : (hackathonSepolia as never);
+}
+
+function rpc() {
+  return process.env.RPC_URL ?? (TARGET === "local"
+    ? "http://127.0.0.1:8545"
+    : "https://ethereum-sepolia-rpc.publicnode.com");
 }
 
 export function abiOf(name: string) {
@@ -29,10 +45,7 @@ export function abiOf(name: string) {
 }
 
 export function client() {
-  return createPublicClient({
-    chain: foundry,
-    transport: http(process.env.RPC_URL ?? "http://127.0.0.1:8545"),
-  });
+  return createPublicClient({ chain: chain(), transport: http(rpc()) });
 }
 
 // The broker is a server-side process; in the demo it holds the deployer key.
@@ -40,13 +53,16 @@ export function broker() {
   const pk = (process.env.BROKER_KEY ??
     "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80") as `0x${string}`;
   return createWalletClient({
-    account: privateKeyToAccount(pk),
-    chain: foundry,
-    transport: http(process.env.RPC_URL ?? "http://127.0.0.1:8545"),
+    account: privateKeyToAccount(pk), chain: chain(), transport: http(rpc()),
   });
 }
 
-export const RANGE = { fromBlock: 0n, toBlock: "latest" } as const;
+// Anvil starts at genesis; a public Sepolia node will not scan 11M blocks, so the
+// deployment records the block its contracts landed in.
+export const RANGE = {
+  fromBlock: BigInt(deployment().startBlock ?? 0),
+  toBlock: "latest",
+} as const;
 
 export const CAPS = [
   "swap.uniswap", "lend.aave.supply", "lend.aave.repay", "lend.aave.withdraw",

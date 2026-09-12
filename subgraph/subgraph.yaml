@@ -7,9 +7,9 @@ dataSources:
     name: GrantStore
     network: sepolia
     source:
-      address: "0x0000000000000000000000000000000000000000"
+      address: "0x1e84432141f3fc1f14ebffc801aa020330d3fea9"
       abi: GrantStore
-      startBlock: 0
+      startBlock: 11690689
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9
@@ -38,9 +38,9 @@ dataSources:
     name: AttenuatedSubregistry
     network: sepolia
     source:
-      address: "0x0000000000000000000000000000000000000000"
+      address: "0x2f843fbf91b9f26909f171379db47596c83b10dd"
       abi: AttenuatedSubregistry
-      startBlock: 0
+      startBlock: 11690689
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9
@@ -59,9 +59,9 @@ dataSources:
     name: Executor
     network: sepolia
     source:
-      address: "0x0000000000000000000000000000000000000000"
+      address: "0x540a26dfcadf9b93225b7d0d61f6ac2646674ac3"
       abi: Executor
-      startBlock: 0
+      startBlock: 11690689
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9
@@ -74,3 +74,23 @@ dataSources:
       eventHandlers:
         - event: Executed(indexed uint256,indexed uint8,address,uint256,uint32)
           handler: handleExecuted
+templates:
+  - kind: ethereum/contract
+    name: ChildRegistry
+    network: sepolia
+    source:
+      abi: AttenuatedSubregistry
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/mapping.ts
+      entities: [Agent, Escalation, Stats]
+      abis:
+        - name: AttenuatedSubregistry
+          file: ../contracts/out/AttenuatedSubregistry.sol/AttenuatedSubregistry.json
+      eventHandlers:
+        - event: Granted(indexed uint256,string,address,(uint256,uint256,uint256,uint256,uint256,uint64,uint16,bool,bool,bool,uint256,uint64,uint64))
+          handler: handleNamed
+        - event: EscalationBlocked(indexed address,string,(uint256,uint256,uint256,uint256,uint256,uint64,uint16,bool,bool,bool,uint256,uint64,uint64),string,uint256)
+          handler: handleEscalationBlocked

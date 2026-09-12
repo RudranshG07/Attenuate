@@ -88,6 +88,51 @@ Emulated Ledger, no hardware needed:
 ./scripts/speculos.sh             # Speculos with blind signing enabled
 ```
 
+## Live on Sepolia
+
+`attenuate.eth` is registered on the ENSv2 hackathon deployment, and every grant in the
+tree is published as text records on its own permissioned resolver.
+
+```
+$ cast call 0x983c610f91Faa00949943a132650167bf41F440A \
+    'text(bytes32,string)(string)' $(cast namehash risk.attenuate.eth) grant.caps
+"0xd4"
+```
+
+| | |
+|---|---|
+| Name | `attenuate.eth` (ENSv2 hackathon registry, not the public ENS app) |
+| Resolver | [`0x983c…440A`](https://sepolia.etherscan.io/address/0x983c610f91Faa00949943a132650167bf41F440A) |
+| GrantStore | `0x1e84432141f3fc1f14ebffc801aa020330d3fea9` |
+| AttenuatedSubregistry | `0x2f843fbf91b9f26909f171379db47596c83b10dd` |
+| Executor | `0x540a26dfcadf9b93225b7d0d61f6ac2646674ac3` |
+| Deployed at block | `11690689` |
+
+The published tree, read straight off the resolver:
+
+```
+attenuate.eth              caps=0xff  cap=1000  remaining=640  budget=852/1000
+risk.attenuate.eth         caps=0xd4  cap=260   remaining=250  budget=100/140
+exec.attenuate.eth         caps=0x54  cap=100   remaining=100  budget=8/8
+probe.risk.attenuate.eth   caps=0x40  cap=10    remaining=10   budget=40/40
+```
+
+`0xff → 0xd4 → 0x40` is the capability mask narrowing on every hop, and a parent's
+`remaining` drops as its children are minted: 640 = 1000 − 260 − 100. Nothing off-chain
+is involved in either number.
+
+Point the whole stack at it:
+
+```bash
+ATTENUATE_DEPLOYMENT=sepolia npm run web
+```
+
+Reproduce the deployment:
+
+```bash
+LIVE=1 RPC_URL=$SEPOLIA_RPC_URL npx tsx scripts/deploy-sepolia.ts
+```
+
 ## What each partner does here
 
 **ENS.** Every prior project in this space stored agent policy in ENS text records and enforced it somewhere else. We inherit `PermissionedRegistry`, override the mint, and use hierarchical registries as the delegation chain itself. Enhanced Access Control splits granting from revoking, and withholding `ROLE_CAN_TRANSFER_ADMIN` makes a permission non-sellable. No child ever receives `ROLE_SET_RESOLVER`, because an agent that can repoint its own resolver can rewrite the permissions its name publishes.

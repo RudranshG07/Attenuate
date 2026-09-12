@@ -215,6 +215,7 @@ async function main() {
   log(`balance ${Number(eth) / 1e18} ETH\n`);
   if (eth === 0n) throw new Error("deployer has no ETH");
 
+  const startBlock = Number(await pub.getBlockNumber());
   log(`registering ${NAME}`);
   const tokenId = await registerName();
 
@@ -290,8 +291,10 @@ async function main() {
   log("  root mandate signed and accepted");
 
   log("\nminting the tree");
-  const day = BigInt(Math.floor(Date.now() / 1000) + 86400);
-  const hour = BigInt(Math.floor(Date.now() / 1000) + 3600);
+  // Each child outlives the demo but dies well before its parent, so the tree reads as
+  // time-bounded on screen without any node showing up expired.
+  const now = Math.floor(Date.now() / 1000);
+  const days = (n: number) => BigInt(now + n * 86400);
   const C_READ = 1n << BigInt(Cap.DATA_GRAPH_READ);
   const C_REPAY = 1n << BigInt(Cap.LEND_AAVE_REPAY);
   const C_APPROVE = 1n << BigInt(Cap.ERC20_APPROVE);
@@ -323,11 +326,11 @@ async function main() {
 
   await mint(registry, "risk", NAME, grantTuple({
     capabilities: C_DELEGATE | C_READ | C_REPAY | C_APPROVE,
-    spendCap: unit("260"), queryBudget: 140n, expiry: day, maxDepth: 2,
+    spendCap: unit("260"), queryBudget: 140n, expiry: days(14), maxDepth: 2,
   }));
   await mint(registry, "exec", NAME, grantTuple({
     capabilities: C_REPAY | C_APPROVE | C_READ,
-    spendCap: unit("100"), queryBudget: 8n, expiry: hour, maxDepth: 0,
+    spendCap: unit("100"), queryBudget: 8n, expiry: days(7), maxDepth: 0,
   }));
   const riskRegistry = await pub.readContract({
     address: registry, abi: art("AttenuatedSubregistry").abi,
@@ -335,7 +338,7 @@ async function main() {
   }) as Address;
   await mint(riskRegistry, "probe", `risk.${NAME}`, grantTuple({
     capabilities: C_READ, spendCap: unit("10"), queryBudget: 40n,
-    expiry: hour, maxDepth: 0, readOnly: true,
+    expiry: days(3), maxDepth: 0, readOnly: true,
   }));
   log(`  risk, exec, probe   (risk registry ${riskRegistry})`);
 
@@ -362,7 +365,7 @@ async function main() {
   }
 
   writeFileSync("deployments/sepolia.json", JSON.stringify({
-    chainId: await pub.getChainId(), live: LIVE, name: NAME,
+    chainId: await pub.getChainId(), live: LIVE, name: NAME, startBlock,
     node: namehash(NAME), resolver, store, usdc, pool, caps, executor, factory, registry,
     deployer: account.address, ensv2: ENSV2,
   }, null, 2));

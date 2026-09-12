@@ -11,7 +11,14 @@ const namedEvent = parseAbiItem(
   `event Granted(uint256 indexed tokenId, string label, address owner, ${GRANT_TUPLE} grant)`,
 );
 
-const RANGE = { fromBlock: 0n, toBlock: "latest" } as const;
+const authorizedEvent = parseAbiItem(
+  "event RegistryAuthorized(address indexed registry, uint256 indexed node)",
+);
+
+// Anvil starts at genesis; a public Sepolia node refuses a range that wide, so the
+// deployment carries the block its contracts landed in.
+const rangeFor = (d: Deployment) =>
+  ({ fromBlock: BigInt(d.startBlock ?? 0), toBlock: "latest" }) as const;
 
 export interface Node {
   node: bigint;
@@ -41,8 +48,12 @@ export interface Snapshot {
   byNode: Map<string, Node>;
 }
 
-function registries(d: Deployment): Address[] {
-  return [d.registry, d.riskRegistry].filter(Boolean) as Address[];
+// Registries below the root are deployed at grant time, so the store's own
+// authorisations are the only complete list of them.
+async function registries(c: PublicClient, d: Deployment): Promise<Address[]> {
+  const logs = await c.getLogs({ address: d.store, event: authorizedEvent, ...rangeFor(d) });
+  const found = logs.map((l) => (l.args as { registry: Address }).registry);
+  return [...new Set<Address>([d.registry, ...found])];
 }
 
 export async function snapshot(name = process.env.ATTENUATE_DEPLOYMENT ?? "local"): Promise<Snapshot> {
@@ -50,9 +61,11 @@ export async function snapshot(name = process.env.ATTENUATE_DEPLOYMENT ?? "local
   const c = publicClientFor(d) as unknown as PublicClient;
   const rootName = process.env.ATTENUATE_ROOT ?? "attenuate.eth";
 
+  const RANGE = rangeFor(d);
+  const regs = await registries(c, d);
   const [roots, ...named] = await Promise.all([
     c.getLogs({ address: d.store, event: rootEvent, ...RANGE }),
-    ...registries(d).map((r) => c.getLogs({ address: r, event: namedEvent, ...RANGE })),
+    ...regs.map((r) => c.getLogs({ address: r, event: namedEvent, ...RANGE })),
   ]);
 
   const labels = new Map<string, string>();
@@ -63,7 +76,7 @@ export async function snapshot(name = process.env.ATTENUATE_DEPLOYMENT ?? "local
 
   // Which registry governs which node, read straight off the store.
   const governs = new Map<string, Address>();
-  for (const r of registries(d)) {
+  for (const r of regs) {
     const n = (await c.readContract({
       address: d.store, abi: grantStoreAbi, functionName: "nodeOf", args: [r],
     })) as bigint;
