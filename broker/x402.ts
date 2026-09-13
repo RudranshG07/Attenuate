@@ -78,8 +78,7 @@ export async function settle(
 
   const key = opts.privateKey ?? (process.env.ATTENUATE_PRIVATE_KEY as `0x${string}` | undefined);
   if (!key) {
-    // Read-only mode: report what it would cost without sending a transaction.
-    return { remaining: before - required };
+    throw new Error("ATTENUATE_PRIVATE_KEY is required to settle a 402; refusing to fake a debit");
   }
 
   const caps = (await client.readContract({
@@ -133,10 +132,11 @@ export async function fetchPaid<T = unknown>(
   if (!demand) throw new Error("402 without a parseable payment requirement");
 
   const { txHash, remaining } = await settle(node, demand.amount);
+  if (!txHash) throw new Error("settle returned no transaction hash");
 
   const retry = await fetch(url, {
     ...init,
-    headers: { ...(init.headers ?? {}), "X-Payment": txHash ?? "dry-run", "X-Payment-Node": node.toString() },
+    headers: { ...(init.headers ?? {}), "X-Payment": txHash, "X-Payment-Node": node.toString() },
   });
   if (!retry.ok) throw new Error(`paid ${demand.amount} but retry failed: ${retry.status}`);
 

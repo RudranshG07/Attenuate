@@ -1,10 +1,11 @@
-import { parseUnits, type Address } from "viem";
-import { registryAbi } from "../broker/abi.js";
+import { encodeFunctionData, parseUnits, type Address } from "viem";
+import { capabilityRegistryAbi, executorAbi, grantStoreAbi, registryAbi } from "../broker/abi.js";
 import { walletClientFor } from "../broker/client.js";
 import { newGrant, simulateGrant, tuple } from "../broker/grant.js";
-import type { Grant } from "../broker/types.js";
+import { Cap, type Grant } from "../broker/types.js";
 import { deviceAvailable, requestApproval } from "../broker/keyring.js";
-import { requireNode, snapshot, type Node, type Snapshot } from "./tree.js";
+import { readPosition } from "../agent/monitor.js";
+import { requireNode, snapshot, type Node } from "./tree.js";
 
 export interface GrantInput {
   capabilities: string;
@@ -173,10 +174,66 @@ export async function query_position(a: { name: string; protocol: string; accoun
   if (n.queryRemaining <= 0n) {
     return { ok: false, reason: "OVER_QUERY_BUDGET", detail: `${n.name} has no query budget left` };
   }
+
+  const account = (a.account || s.deployment.executor) as Address;
+  const pos = await readPosition(account, s.deployment, s.client);
+
+  let txHash: `0x${string}` | undefined;
+  let queryRemaining = n.queryRemaining;
+  const key = process.env.ATTENUATE_PRIVATE_KEY ?? process.env.BROKER_KEY;
+  if (key) {
+    const spec = (await s.client.readContract({
+      address: s.deployment.caps,
+      abi: capabilityRegistryAbi,
+      functionName: "caps",
+      args: [Cap.DATA_GRAPH_READ],
+    })) as { target: Address; selector: `0x${string}`; enabled: boolean };
+    if (!spec.enabled) throw new Error("CAP_DISABLED: data.graph.read is not configured");
+
+    const callData = encodeFunctionData({
+      abi: [{ type: "function", name: "healthFactor", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }], stateMutability: "view" }],
+      functionName: "healthFactor",
+      args: [account],
+    });
+    const w = walletClientFor(s.deployment, key as `0x${string}`);
+    txHash = await w.writeContract({
+      address: s.deployment.executor,
+      abi: executorAbi,
+      functionName: "execute",
+      args: [n.node, Cap.DATA_GRAPH_READ, spec.target, 0n, callData],
+    });
+    await s.client.waitForTransactionReceipt({ hash: txHash });
+    const after = (await s.client.readContract({
+      address: s.deployment.store, abi: grantStoreAbi, functionName: "grantOf", args: [n.node],
+    })) as { queryRemaining: bigint };
+    queryRemaining = after.queryRemaining;
+  }
+
+  let subgraph: unknown;
+  const url = process.env.GRAPH_SUBGRAPH_URL;
+  if (url) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query: `{ stats(id: "global") { agentsGranted executions totalSpent } agents(first: 10) { id label spendRemaining queryRemaining revoked } }`,
+      }),
+    });
+    if (res.ok) subgraph = await res.json();
+  }
+
   return {
-    ok: false,
-    reason: "NOT_CONNECTED",
-    detail: "Set GRAPH_STUDIO_API_KEY to read live position data through the Subgraph MCP.",
-    queryRemaining: n.queryRemaining.toString(),
+    ok: true,
+    protocol: a.protocol,
+    account,
+    healthFactor: Number.isFinite(pos.healthFactor) ? pos.healthFactor : "inf",
+    collateralUsd: pos.collateralUsd.toString(),
+    debtUsd: pos.debtUsd.toString(),
+    liquidationThreshold: pos.liquidationThreshold,
+    blockNumber: pos.blockNumber.toString(),
+    paid: Boolean(txHash),
+    txHash,
+    queryRemaining: queryRemaining.toString(),
+    subgraph: subgraph ?? null,
   };
 }

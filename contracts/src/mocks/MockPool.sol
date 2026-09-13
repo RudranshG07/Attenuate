@@ -30,6 +30,14 @@ contract MockPool {
         suppliedOf[onBehalfOf] += amount;
     }
 
+    function withdraw(address, uint256 amount, address to) external returns (uint256) {
+        uint256 have = suppliedOf[msg.sender];
+        require(have >= amount, "INSUFFICIENT_SUPPLY");
+        suppliedOf[msg.sender] = have - amount;
+        ASSET.transfer(to, amount);
+        return amount;
+    }
+
     function healthFactor(address who) external view returns (uint256) {
         uint256 debt = debtOf[who];
         return debt == 0 ? type(uint256).max : (suppliedOf[who] * 1e18) / debt;

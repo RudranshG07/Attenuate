@@ -16,7 +16,7 @@ files, and who authored what.
 | Path | Author | AI involvement |
 |---|---|---|
 | `contracts/src/` | Jnyandeep | Early skeletons and `GrantStore` started with Claude Code. The current shape — `SubregistryFactory`, factory-deployed child registries, `revokeGrant`, query metering, and the role split — paired with Cursor after reading ENSv2 source. Judgement calls (a registry cannot embed its own initcode; withhold `ROLE_SET_RESOLVER` / `ROLE_SET_SUBREGISTRY` on children) were Jnyandeep's. |
-| `contracts/src/interfaces/IENSv2.sol` | Jnyandeep | Cursor confirmed there is no official `IENSv2`; the live types are `IRegistry` / `IPermissionedRegistry`. The leftover placeholder is unused. |
+| `contracts/src/interfaces/IENSv2.sol` | Jnyandeep | Cursor confirmed there is no official `IENSv2`; the leftover placeholder was deleted. Live types are `IRegistry` / `IPermissionedRegistry`. |
 | `contracts/test/` | Jnyandeep | `Attenuation.t.sol` started with Claude Code. Escalation suite (21 named scenarios with the revert the contract actually emits), conservation invariant, gas harness, and the rewritten depth-2 delegation tests paired with Cursor. |
 | `contracts/script/` | Jnyandeep | `Deploy.s.sol` paired with Cursor. |
 | `contracts/foundry.toml` | Jnyandeep | ENSv2 remappings and `skip = ["lib/**"]` paired with Cursor so a nested `contracts-v2` checkout does not get compiled as ours. |
@@ -30,7 +30,7 @@ files, and who authored what.
 | `indexer/` | Adish7Pandya, RudyG07 | Benchmark shape by Adish7Pandya; Substreams / head trigger and the push-vs-polling harness paired with Claude Code. |
 | `subgraph/` | RudyG07 | Paired with Claude Code. |
 | `web/` | RudyG07 | Paired with Claude Code. |
-| `scripts/` | RudyG07, Jnyandeep | `speculos.sh` and the first `deploy-local.ts` paired with Claude Code. Current `deploy-local.ts`, `deploy-fork.ts` and `smoke.ts` rewritten with Cursor so a three-level tree actually deploys and the Sepolia fork talks to live ENSv2. |
+| `scripts/` | RudyG07, Jnyandeep | `speculos.sh` and the first `deploy-local.ts` paired with Claude Code. Current `deploy-local.ts`, `deploy-fork.ts` and `smoke.ts` rewritten with Cursor so a three-level tree actually deploys and the Sepolia fork talks to live ENSv2. Device-or-software mandate signing, `scripts/agent.ts`, and MockSwap wiring paired with Cursor. |
 | `package.json`, `package-lock.json` | Jnyandeep | Forge / subgraph scripts and lockfile hygiene paired with Cursor. |
 | `.gitignore` | Jnyandeep | `/lib/` ignore (root leftover `forge install`, not `contracts/lib/` submodules) paired with Cursor. |
 | `prompts/` | RudyG07 | Planning artifacts required by the spec-driven-workflow rule; drafted with Claude Code. |

@@ -26,6 +26,7 @@ import { sepolia } from "viem/chains";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { Cap } from "../broker/types.js";
 import { ENSV2, ENSV2_LEGACY, hackathonSepolia } from "../broker/chain.js";
+import { resolveMandateSigner } from "./lib/sign-mandate.js";
 
 const ANVIL_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" as const;
 const REVOKER_KEY = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d" as const;
@@ -222,11 +223,15 @@ async function main() {
   await pub.waitForTransactionReceipt({ hash: mintHash });
   console.log("minted 100_000 ENSv2 MockUSDC to deployer\n");
 
+  console.log("resolving mandate signer");
+  const signer = await resolveMandateSigner(wallet);
+  console.log(`  ${signer.kind}  ${signer.address}\n`);
+
   console.log("deploying Attenuate against live LabelStore\n");
   const labels = ENSV2.labelStore as Address;
   console.log(`${"LabelStore (ENSv2)".padEnd(24)} ${labels}`);
 
-  const store = await deploy("GrantStore", [account.address]);
+  const store = await deploy("GrantStore", [signer.address]);
   const factory = await deploy("SubregistryFactory", [labels, store]);
 
   const roles = ROLE_REGISTRAR | ROLE_REGISTRAR_ADMIN | ROLE_UNREGISTER_ADMIN;
@@ -237,7 +242,9 @@ async function main() {
 
   // Budget asset for Executor metering — separate from ENSv2 registrar MockUSDC.
   const usdc = await deploy("MockERC20", ["Mock USDC", "USDC", 18]);
+  const weth = await deploy("MockERC20", ["Mock WETH", "WETH", 18]);
   const pool = await deploy("MockPool", [usdc]);
+  const swap = await deploy("MockSwap", [usdc, weth]);
   const caps = await deploy("CapabilityRegistry", [usdc]);
   const executor = await deploy("Executor", [store, caps]);
 
@@ -245,11 +252,15 @@ async function main() {
   await write(store, "GrantStore", "setExecutor", [executor]);
   await write(store, "GrantStore", "authorizeRegistry", [registry, ROOT]);
   await write(usdc, "MockERC20", "mint", [executor, 1000n * 10n ** 18n]);
+  await write(weth, "MockERC20", "mint", [swap, 1000n * 10n ** 18n]);
   await write(executor, "Executor", "setAllowance", [usdc, pool, 2n ** 256n - 1n]);
+  await write(executor, "Executor", "setAllowance", [usdc, swap, 2n ** 256n - 1n]);
   await write(pool, "MockPool", "setDebt", [executor, 500n * 10n ** 18n]);
 
   const repaySel = toFunctionSelector("repay(address,uint256,uint256,address)");
   const supplySel = toFunctionSelector("supply(address,uint256,uint16,address)");
+  const withdrawSel = toFunctionSelector("withdraw(address,uint256,address)");
+  const swapSel = toFunctionSelector("swap(address,uint256,uint256)");
   const healthSel = toFunctionSelector("healthFactor(address)");
   const approveSel = toFunctionSelector("approve(address,uint256)");
 
@@ -258,7 +269,8 @@ async function main() {
 
   await setCap(Cap.LEND_AAVE_REPAY, capSpec({ target: pool, selector: repaySel, amountArgIndex: 1 }));
   await setCap(Cap.LEND_AAVE_SUPPLY, capSpec({ target: pool, selector: supplySel, amountArgIndex: 1 }));
-  await setCap(Cap.SWAP_UNISWAP, capSpec({ target: pool, selector: repaySel, amountArgIndex: 1 }));
+  await setCap(Cap.LEND_AAVE_WITHDRAW, capSpec({ target: pool, selector: withdrawSel, amountArgIndex: 1 }));
+  await setCap(Cap.SWAP_UNISWAP, capSpec({ target: swap, selector: swapSel, amountArgIndex: 1 }));
   await setCap(Cap.DATA_GRAPH_READ, capSpec({
     target: pool, selector: healthSel, amountArgIndex: NO_AMOUNT, queryCost: 1, readSafe: true,
   }));
@@ -276,27 +288,12 @@ async function main() {
     maxDepth: 3,
     nonce: 0n,
   };
-  const sig = await wallet.signTypedData({
-    domain: { name: "Attenuate", version: "1", chainId: sepolia.id, verifyingContract: store },
-    types: {
-      RootMandate: [
-        { name: "node", type: "uint256" },
-        { name: "capabilities", type: "uint256" },
-        { name: "spendCap", type: "uint256" },
-        { name: "queryBudget", type: "uint256" },
-        { name: "expiry", type: "uint64" },
-        { name: "maxDepth", type: "uint16" },
-        { name: "nonce", type: "uint256" },
-      ],
-    },
-    primaryType: "RootMandate",
-    message: mandate,
-  });
+  const sig = await signer.sign(sepolia.id, store, mandate);
   await write(store, "GrantStore", "initRoot", [mandate, sig]);
   await write(store, "GrantStore", "setRootAgent", [ROOT, account.address]);
-  console.log("root mandate signed (Sepolia chainId) and seeded");
+  console.log(`root mandate signed by ${signer.kind} (Sepolia chainId) and seeded`);
 
-  console.log("\nseeding demo tree via ENSv2 LabelStore");
+  console.log("\nseeding tree via ENSv2 LabelStore");
   const day = BigInt(Math.floor(Date.now() / 1000) + 86400);
   const hour = BigInt(Math.floor(Date.now() / 1000) + 3600);
   const eth = (n: string) => BigInt(n) * 10n ** 18n;
@@ -355,9 +352,12 @@ async function main() {
     factory,
     labels,
     usdc,
+    weth,
     pool,
+    swap,
     ensMockUsdc: ENSV2.mockUsdc,
-    device: account.address,
+    device: signer.address,
+    mandateSigner: signer.kind,
     revoker: revoker.address,
     rootAgent: account.address,
     root: ROOT.toString(),

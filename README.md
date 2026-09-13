@@ -33,7 +33,7 @@ Three properties follow:
 
 **Revocation is instant and total.** Each node stores an epoch and children record their parent's epoch at grant time. Bumping a parent's epoch is one storage write and every descendant is dead in the same block, at any depth.
 
-The root exists only because a human signed one EIP-712 mandate on a Ledger. There is no owner function that can seed it.
+The root exists only because someone signed one EIP-712 mandate that `GrantStore` recovers as `deviceKey`. There is no owner function that can seed it. Deploy scripts sign on Ledger/Speculos when one is reachable, otherwise they fall back to the deployer key and write `mandateSigner: "software"` into the deployment JSON.
 
 ## The AI part
 
@@ -70,7 +70,7 @@ Local demo, four commands:
 
 ```bash
 npm run chain          # anvil
-npm run deploy:local   # contracts, device-signed root mandate, and a three-level tree
+npm run deploy:local   # contracts, root mandate, and a three-level tree
 npm run smoke          # end-to-end: grant, execute, refuse, revoke, reclaim
 npm run web            # localhost:3000
 ```
@@ -138,7 +138,7 @@ LIVE=1 RPC_URL=$SEPOLIA_RPC_URL npx tsx scripts/deploy-sepolia.ts
 
 **ENS.** Every prior project in this space stored agent policy in ENS text records and enforced it somewhere else. We inherit `PermissionedRegistry`, override the mint, and use hierarchical registries as the delegation chain itself. Enhanced Access Control splits granting from revoking, and withholding `ROLE_CAN_TRANSFER_ADMIN` makes a permission non-sellable. No child ever receives `ROLE_SET_RESOLVER`, because an agent that can repoint its own resolver can rewrite the permissions its name publishes.
 
-**Ledger.** One EIP-712 mandate signed on device is the only way the tree can exist. The broker releases scoped, expiring capabilities to sub-agents through the Key Ring and never a key. Development runs against Speculos, headless, with a one-command setup script.
+**Ledger.** `initRoot` recovers the EIP-712 mandate against `deviceKey`; a software signature is accepted only when that key is the deployer. Speculos is the development path (`./scripts/speculos.sh`, then `npm run speculos:approve`). Without a device, deploys record `mandateSigner: "software"` instead of claiming a Ledger was used.
 
 **The Graph.** A subgraph indexes the permission tree itself, so any agent's full history of grants, spends and refusals is one query. The MCP server lets any agent in any framework delegate under enforced budgets without ever seeing this project.
 

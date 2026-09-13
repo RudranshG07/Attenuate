@@ -50,6 +50,14 @@ export async function signRootMandate(
     domain: domain(chainId, store),
     types: ROOT_MANDATE_TYPES,
     primaryType: "RootMandate",
-    message: { ...m },
+    message: {
+      node: m.node.toString(),
+      capabilities: m.capabilities.toString(),
+      spendCap: m.spendCap.toString(),
+      queryBudget: m.queryBudget.toString(),
+      expiry: m.expiry.toString(),
+      maxDepth: m.maxDepth,
+      nonce: m.nonce.toString(),
+    },
   });
 }

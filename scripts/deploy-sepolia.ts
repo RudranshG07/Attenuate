@@ -18,7 +18,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { readFileSync, writeFileSync } from "node:fs";
 import { ENSV2, hackathonSepolia } from "../broker/chain.js";
 import { Cap } from "../broker/types.js";
-import { ROOT_MANDATE_TYPES } from "../broker/mandate.js";
+import { resolveMandateSigner } from "./lib/sign-mandate.js";
 
 const LIVE = process.env.LIVE === "1";
 const RPC = process.env.RPC_URL ?? "http://127.0.0.1:8545";
@@ -215,6 +215,10 @@ async function main() {
   log(`balance ${Number(eth) / 1e18} ETH\n`);
   if (eth === 0n) throw new Error("deployer has no ETH");
 
+  log("resolving mandate signer");
+  const signer = await resolveMandateSigner(wallet);
+  log(`  ${signer.kind}  ${signer.address}`);
+
   const startBlock = Number(await pub.getBlockNumber());
   log(`registering ${NAME}`);
   const tokenId = await registerName();
@@ -234,9 +238,11 @@ async function main() {
   log(`  PermissionedResolver     ${resolver}`);
 
   log("\ndeploying Attenuate");
-  const store = await deploy("GrantStore", [account.address]);
+  const store = await deploy("GrantStore", [signer.address]);
   const usdc = await deploy("MockERC20", ["Budget USDC", "bUSDC", 18]);
+  const weth = await deploy("MockERC20", ["Budget WETH", "bWETH", 18]);
   const pool = await deploy("MockPool", [usdc]);
+  const swap = await deploy("MockSwap", [usdc, weth]);
   const caps = await deploy("CapabilityRegistry", [usdc]);
   const executor = await deploy("Executor", [store, caps]);
   const factory = await deploy("SubregistryFactory", [ENSV2.labelStore, store]);
@@ -259,15 +265,23 @@ async function main() {
   await write(store, "GrantStore", "setExecutor", [executor]);
   await write(store, "GrantStore", "authorizeRegistry", [registry, BigInt(namehash(NAME))]);
   await write(usdc, "MockERC20", "mint", [executor, 1000n * 10n ** 18n]);
+  await write(weth, "MockERC20", "mint", [swap, 1000n * 10n ** 18n]);
   await write(executor, "Executor", "setAllowance", [usdc, pool, 2n ** 256n - 1n]);
+  await write(executor, "Executor", "setAllowance", [usdc, swap, 2n ** 256n - 1n]);
   await write(pool, "MockPool", "setDebt", [executor, 500n * 10n ** 18n]);
 
   const setCap = (bit: number, spec: ReturnType<typeof capSpec>) =>
     write(caps, "CapabilityRegistry", "setCap", [bit, spec]);
   const repaySel = toFunctionSelector("repay(address,uint256,uint256,address)");
+  const supplySel = toFunctionSelector("supply(address,uint256,uint16,address)");
+  const withdrawSel = toFunctionSelector("withdraw(address,uint256,address)");
+  const swapSel = toFunctionSelector("swap(address,uint256,uint256)");
   const healthSel = toFunctionSelector("healthFactor(address)");
   const approveSel = toFunctionSelector("approve(address,uint256)");
   await setCap(Cap.LEND_AAVE_REPAY, capSpec({ target: pool, selector: repaySel, amountArgIndex: 1 }));
+  await setCap(Cap.LEND_AAVE_SUPPLY, capSpec({ target: pool, selector: supplySel, amountArgIndex: 1 }));
+  await setCap(Cap.LEND_AAVE_WITHDRAW, capSpec({ target: pool, selector: withdrawSel, amountArgIndex: 1 }));
+  await setCap(Cap.SWAP_UNISWAP, capSpec({ target: swap, selector: swapSel, amountArgIndex: 1 }));
   await setCap(Cap.DATA_GRAPH_READ, capSpec({
     target: pool, selector: healthSel, amountArgIndex: NO_AMOUNT, queryCost: 1, readSafe: true,
   }));
@@ -282,13 +296,10 @@ async function main() {
     node: ROOT, capabilities: 0xffn, spendCap: 1000n * 10n ** 18n,
     queryBudget: 1000n, expiry, maxDepth: 3, nonce: 0n,
   };
-  const sig = await wallet.signTypedData({
-    domain: { name: "Attenuate", version: "1", chainId: await pub.getChainId(), verifyingContract: store },
-    types: ROOT_MANDATE_TYPES, primaryType: "RootMandate", message: mandate,
-  });
+  const sig = await signer.sign(await pub.getChainId(), store, mandate);
   await write(store, "GrantStore", "initRoot", [mandate, sig]);
   await write(store, "GrantStore", "setRootAgent", [ROOT, account.address]);
-  log("  root mandate signed and accepted");
+  log(`  root mandate signed by ${signer.kind} and accepted`);
 
   log("\nminting the tree");
   // Each child outlives the demo but dies well before its parent, so the tree reads as
@@ -366,7 +377,8 @@ async function main() {
 
   writeFileSync("deployments/sepolia.json", JSON.stringify({
     chainId: await pub.getChainId(), live: LIVE, name: NAME, startBlock,
-    node: namehash(NAME), resolver, store, usdc, pool, caps, executor, factory, registry,
+    node: namehash(NAME), resolver, store, usdc, weth, pool, swap, caps, executor, factory, registry,
+    device: signer.address, mandateSigner: signer.kind,
     deployer: account.address, ensv2: ENSV2,
   }, null, 2));
   log("\nwrote deployments/sepolia.json");

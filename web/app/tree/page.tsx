@@ -113,13 +113,11 @@ export default function TreePage() {
         {conn === "checking" && <div className={s.skeleton} aria-hidden="true" />}
         {conn === "down" && (
           <p className={s.empty}>
-            No chain reachable. Start one, deploy, and seed a tree:
+            No chain reachable. Start one and deploy a tree:
             <br />
             <span className="mono">npm run chain</span>
             <br />
             <span className="mono">npm run deploy:local</span>
-            <br />
-            <span className="mono">npx tsx scripts/seed-demo.ts</span>
           </p>
         )}
         {conn === "live" && !root && (

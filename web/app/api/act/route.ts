@@ -25,7 +25,7 @@ export async function POST(req: Request) {
       const label = `task${Date.now().toString().slice(-5)}`;
       const hash = await w.writeContract({
         address: d.registry, abi: registryAbi, functionName: "registerWithGrant",
-        args: [label, w.account.address, w.account.address, d.registry,
+        args: [label, w.account.address, w.account.address,
           grantTuple(0x04n, parseUnits("20", 18), 4n, soon, 0, false)],
       });
       await c.waitForTransactionReceipt({ hash });
@@ -36,7 +36,7 @@ export async function POST(req: Request) {
       // Deliberately over-scoped: asks for capabilities the parent does not hold.
       const hash = await w.writeContract({
         address: d.registry, abi: registryAbi, functionName: "registerOrLog",
-        args: [`bad${Date.now().toString().slice(-5)}`, w.account.address, w.account.address, d.registry,
+        args: [`bad${Date.now().toString().slice(-5)}`, w.account.address, w.account.address,
           grantTuple(0x1ffn, parseUnits("900", 18), 5000n, soon, 3, false)],
       });
       await c.waitForTransactionReceipt({ hash });

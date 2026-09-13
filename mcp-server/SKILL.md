@@ -206,7 +206,7 @@ Unspent budget is not returned automatically. Call `reclaim` on each dead node t
 
 ### `query_position`
 
-Read live lending-position data through the Subgraph MCP, paid per query from `queryRemaining` via x402.
+Read the live lending position from the configured pool. If `ATTENUATE_PRIVATE_KEY` or `BROKER_KEY` is set, the read is paid by `Executor.execute` on `data.graph.read`, which debits `queryRemaining`. If `GRAPH_SUBGRAPH_URL` is set, the indexed tree is queried as well.
 
 ```
 Input:  { name: "risk.agent.eth", protocol: "aave-v3", account: "0x..." }

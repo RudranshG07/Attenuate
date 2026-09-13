@@ -332,9 +332,9 @@ The enforcement evidence is therefore not anecdotal. `contracts/test/Escalation.
 is 21 tests, one per way a child can try to exceed its parent, and all 21 are refused
 at mint time. That is exhaustive where a model run is a sample.
 
-`reachedExecution` is **structurally** zero, not empirically zero: an out-of-scope
-grant can never execute because the name is never minted. That is the part that does
-not depend on which model proposed, or on how well it behaved on the day.
+`reachedExecution` counts accepted proposals that produced a mint transaction.
+Out-of-scope proposals stay at zero because the name is never minted. That refusal
+does not depend on which model proposed, or on how well it behaved on the day.
 
 The design line worth stating: structured output constrains the *shape* of the model's
 reply so it always parses, and deliberately **not** the scope. Filtering the proposal
