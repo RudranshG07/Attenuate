@@ -11,6 +11,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { foundry } from "viem/chains";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { Cap } from "../broker/types.js";
+import { agentAccount, agentAddress } from "../agent/identity.js";
 
 // Anvil account #0 — also the device key that signs the root mandate.
 const ANVIL_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" as const;
@@ -94,9 +95,10 @@ async function mint(
   label: string,
   owner: Address,
   g: readonly unknown[],
+  as = wallet,
 ): Promise<bigint> {
   const abi = artifact("AttenuatedSubregistry").abi;
-  const hash = await wallet.writeContract({
+  const hash = await as.writeContract({
     address: registry,
     abi,
     functionName: "registerWithGrant",
@@ -210,10 +212,17 @@ async function main() {
   const C_APPROVE = 1n << BigInt(Cap.ERC20_APPROVE);
   const C_DELEGATE = 1n << BigInt(Cap.DELEGATE);
 
+  // Each name is minted to a key of its own. grantTo sets agentOf to the owner, and
+  // Executor refuses anyone else, so these addresses are the agents in the only sense
+  // the chain recognises.
+  for (const label of ["risk", "exec", "probe"]) {
+    await wallet.sendTransaction({ to: agentAddress(label), value: eth("1") } as never);
+  }
+
   const risk = await mint(
     registry,
     "risk",
-    account.address,
+    agentAddress("risk"),
     grantTuple({
       capabilities: C_DELEGATE | C_READ | C_REPAY | C_APPROVE,
       spendCap: eth("260"),
@@ -226,7 +235,7 @@ async function main() {
   const exec = await mint(
     registry,
     "exec",
-    account.address,
+    agentAddress("exec"),
     grantTuple({
       capabilities: C_REPAY | C_APPROVE | C_READ,
       spendCap: eth("100"),
@@ -244,10 +253,17 @@ async function main() {
   }) as Address;
   console.log(`  risk registry ${riskRegistry}`);
 
+  // Minted by risk's own key, not the deployer's. risk is the registrar of the
+  // registry under its name, so this is delegation happening rather than being
+  // described: the deployer could not mint here if it tried.
+  const riskWallet = createWalletClient({
+    account: agentAccount("risk"), chain: foundry, transport,
+  });
+
   const probe = await mint(
     riskRegistry,
     "probe",
-    account.address,
+    agentAddress("probe"),
     grantTuple({
       capabilities: C_READ,
       spendCap: eth("10"),
@@ -256,6 +272,7 @@ async function main() {
       maxDepth: 0,
       readOnly: true,
     }),
+    riskWallet,
   );
 
   mkdirSync("deployments", { recursive: true });
@@ -269,6 +286,11 @@ async function main() {
     labels,
     usdc,
     pool,
+    agents: {
+      risk: agentAddress("risk"),
+      exec: agentAddress("exec"),
+      probe: agentAddress("probe"),
+    },
     device: account.address,
     revoker: revoker.address,
     rootAgent: account.address,

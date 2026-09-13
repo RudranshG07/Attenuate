@@ -130,6 +130,14 @@ it somewhere else. **We put both in the naming layer.**
 
 `AttenuatedSubregistry` inherits `PermissionedRegistry` and overrides `register()` to
 revert. The standard way of minting a name under `attenuate.eth` does not work at all.
+
+**A name is only usable by whoever holds its key.** Each subname is minted to a
+distinct address and `Executor` requires `msg.sender == STORE.agentOf(node)`, so
+`risk`, `exec` and `probe` are separate processes with separate keys rather than
+function calls with names attached. `probe` is minted by `risk`'s key into the registry
+under `risk`'s own name, where the deployer has no rights at all. `npm run agent
+<label>` runs one; running it with a key that does not hold the name is refused
+`NOT_AGENT` on chain.
 The only entry point is `registerWithGrant`, which refuses to mint a subname whose
 grant is not a strict subset of its parent's. An over-privileged agent is not rejected
 at use time — **it cannot come into existence.**

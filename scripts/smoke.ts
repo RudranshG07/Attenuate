@@ -8,6 +8,7 @@ import {
   type Chain,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
+import { agentAddress } from "../agent/identity.js";
 import { foundry } from "viem/chains";
 import { readFileSync } from "node:fs";
 import { loadDeployment } from "../broker/client.js";
@@ -177,7 +178,8 @@ async function main() {
       abi: executorAbi,
       functionName: "execute",
       args: [execNode, Cap.LEND_AAVE_REPAY, d.pool, 0n, over],
-      account: account.address,
+      // exec holds its own key, so the budget check is only reachable as exec.
+      account: agentAddress("exec"),
     });
     fail("over budget", "simulate should have reverted");
   } catch (e) {

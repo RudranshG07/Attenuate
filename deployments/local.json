@@ -8,6 +8,11 @@
   "labels": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
   "usdc": "0x5fc8d32690cc91d4c39d9d3abcbd16989f875707",
   "pool": "0x0165878a594ca255338adfa4d48449f69242eb8f",
+  "agents": {
+    "risk": "0x7f861F119bdC25B3a815c2762A1eD3EcE3d1370A",
+    "exec": "0xe16044c2f4D7b54Ce35E20922484f419ad01e06e",
+    "probe": "0x8190A5471Cb8a3DF0a5520A81f0c1D990034f091"
+  },
   "device": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
   "revoker": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
   "rootAgent": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",

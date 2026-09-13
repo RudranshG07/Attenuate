@@ -28,6 +28,9 @@ indexer/.cursor
 # docs
 *.md
 !/README.md
+# ETHOnline requires spec-driven submissions to include their spec and planning
+# artifacts, so the implementation spec ships. The strategy doc deliberately does not.
+!/SPEC.md
 !/mcp-server/SKILL.md
 *.bak
 *.docx

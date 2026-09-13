@@ -134,6 +134,31 @@ Reproduce the deployment:
 LIVE=1 RPC_URL=$SEPOLIA_RPC_URL npx tsx scripts/deploy-sepolia.ts
 ```
 
+## Sub-agents are processes, not function calls
+
+Every name holds a key of its own. `Executor.execute` requires
+`msg.sender == STORE.agentOf(node)`, so a name is only usable by whoever holds it —
+delegation that can be watched rather than described.
+
+```bash
+npm run agent exec  repay 5      # holds lend.aave.repay
+npm run agent probe repay 5      # read-only leaf
+ATTENUATE_AGENT_SEED=someone-else npm run agent exec repay 5
+```
+
+```
+agent exec.attenuate.eth   pid 25439  key 0xe160…e06e  holds true   EXECUTED repay
+agent probe.attenuate.eth  pid 25464  key 0x8190…f091  holds true   REFUSED  CAP_MISSING
+agent exec.attenuate.eth   pid 25505  key 0x42E2…11ab  holds false  REFUSED  NOT_AGENT
+```
+
+Separate processes, separate keys, three different outcomes decided on chain. `probe`
+is refused because its grant never held the capability; the third is refused because
+holding the name is not the same as knowing about it.
+
+`probe` is also minted *by risk's key*, not the deployer's: risk is the registrar of
+the registry under its own name, so the deployer could not mint there if it tried.
+
 ## What each partner does here
 
 **ENS.** Every prior project in this space stored agent policy in ENS text records and enforced it somewhere else. We inherit `PermissionedRegistry`, override the mint, and use hierarchical registries as the delegation chain itself. Enhanced Access Control splits granting from revoking, and withholding `ROLE_CAN_TRANSFER_ADMIN` makes a permission non-sellable. No child ever receives `ROLE_SET_RESOLVER`, because an agent that can repoint its own resolver can rewrite the permissions its name publishes.
