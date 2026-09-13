@@ -75,11 +75,12 @@ npm run smoke          # end-to-end: grant, execute, refuse, revoke, reclaim
 npm run web            # localhost:3000
 ```
 
-Against a fork of real Sepolia, using the live ENSv2 LabelStore:
+Against a fork of real Sepolia, using the live ENSv2 LabelStore and Uniswap V3:
 
 ```bash
-anvil --fork-url $SEPOLIA_RPC_URL
-npx tsx scripts/deploy-fork.ts
+npm run chain:fork
+npm run deploy:fork   # wires swap.uniswap to SwapRouter02
+npm run swap:fork     # 0.01 WETH → Circle USDC through the Executor
 ```
 
 Emulated Ledger, no hardware needed:

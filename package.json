@@ -22,6 +22,7 @@
     "plan": "tsx scripts/plan.ts",
     "agent": "tsx scripts/agent.ts",
     "smoke:fork": "DEPLOYMENT=fork tsx scripts/smoke.ts",
+    "swap:fork": "DEPLOYMENT=fork tsx scripts/swap-fork.ts",
     "speculos": "./scripts/speculos.sh",
     "speculos:approve": "tsx scripts/speculos-approve.ts",
     "subgraph:codegen": "cd subgraph && graph codegen",

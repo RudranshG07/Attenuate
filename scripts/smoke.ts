@@ -229,6 +229,36 @@ async function main() {
   if (returned !== 20n * 10n ** 18n) fail("reclaim", `returned ${returned}`);
   ok("reclaim", `returned ${returned / 10n ** 18n} eth to root`);
 
+  if (d.swapKind === "uniswap-v3" && d.swap && d.weth && d.sepoliaUsdc) {
+    console.log("\n6. real Uniswap V3 swap via Executor");
+    const { encodeExactInputSingle } = await import("../broker/uniswap-sepolia.js");
+    const amountIn = 10n ** 16n; // 0.01 WETH
+    const wethBefore = await pub.readContract({
+      address: d.weth, abi: erc20Abi, functionName: "balanceOf", args: [d.executor],
+    }) as bigint;
+    const usdcBefore = await pub.readContract({
+      address: d.sepoliaUsdc, abi: erc20Abi, functionName: "balanceOf", args: [d.executor],
+    }) as bigint;
+    const swapData = encodeExactInputSingle({
+      tokenIn: d.weth, tokenOut: d.sepoliaUsdc, fee: d.uniswapFee ?? 3000,
+      recipient: d.executor, amountIn, amountOutMinimum: 1n,
+    });
+    const swapHash = await wallet.writeContract({
+      address: d.executor, abi: executorAbi, functionName: "execute",
+      args: [ROOT, Cap.SWAP_UNISWAP, d.swap, 0n, swapData],
+    } as never);
+    await pub.waitForTransactionReceipt({ hash: swapHash });
+    const wethAfter = await pub.readContract({
+      address: d.weth, abi: erc20Abi, functionName: "balanceOf", args: [d.executor],
+    }) as bigint;
+    const usdcAfter = await pub.readContract({
+      address: d.sepoliaUsdc, abi: erc20Abi, functionName: "balanceOf", args: [d.executor],
+    }) as bigint;
+    if (wethBefore - wethAfter !== amountIn) fail("uniswap", `WETH delta ${wethBefore - wethAfter}`);
+    if (usdcAfter <= usdcBefore) fail("uniswap", `Circle USDC did not increase (${usdcBefore} -> ${usdcAfter})`);
+    ok("uniswap v3 exactInputSingle", `0.01 WETH -> ${usdcAfter - usdcBefore} Circle USDC  ${swapHash}`);
+  }
+
   console.log("\nsmoke passed");
 }
 

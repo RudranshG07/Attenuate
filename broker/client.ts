@@ -16,6 +16,12 @@ export interface Deployment {
   pool: Address;
   swap?: Address;
   weth?: Address;
+  sepoliaUsdc?: Address;
+  uniswapPool?: Address;
+  uniswapFee?: number;
+  uniswapFactory?: Address;
+  swapKind?: "uniswap-v3" | "mock";
+  swapSeeded?: boolean;
   device: Address;
   revoker: Address;
   rootAgent: Address;

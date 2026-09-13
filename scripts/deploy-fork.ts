@@ -8,6 +8,7 @@
  *   - AttenuatedSubregistry registers labels through the real Sepolia LabelStore
  *   - EIP-712 domain uses chainId 11155111 (Sepolia), not Foundry's 31337
  *   - Anvil accounts are funded on the fork so gas is available
+ *   - swap.uniswap hits live SwapRouter02 (WETH → Circle USDC), not MockSwap
  */
 import {
   createWalletClient,
@@ -26,7 +27,9 @@ import { sepolia } from "viem/chains";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { Cap } from "../broker/types.js";
 import { ENSV2, ENSV2_LEGACY, hackathonSepolia } from "../broker/chain.js";
+import { EXACT_INPUT_SINGLE_SELECTOR } from "../broker/uniswap-sepolia.js";
 import { resolveMandateSigner } from "./lib/sign-mandate.js";
+import { EXACT_INPUT_SINGLE_AMOUNT_INDEX, EXACT_INPUT_SINGLE_TOKEN_IN_INDEX, wireUniswapOnFork } from "./lib/uniswap-fork.js";
 
 const ANVIL_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" as const;
 const REVOKER_KEY = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d" as const;
@@ -240,27 +243,26 @@ async function main() {
   ]);
   await write(registry, "AttenuatedSubregistry", "grantRootRoles", [ROLE_UNREGISTER, revoker.address]);
 
-  // Budget asset for Executor metering — separate from ENSv2 registrar MockUSDC.
+  // Budget asset for Executor metering — separate from ENSv2 registrar MockUSDC
+  // and from Circle USDC used in the live Uniswap swap.
   const usdc = await deploy("MockERC20", ["Mock USDC", "USDC", 18]);
-  const weth = await deploy("MockERC20", ["Mock WETH", "WETH", 18]);
   const pool = await deploy("MockPool", [usdc]);
-  const swap = await deploy("MockSwap", [usdc, weth]);
   const caps = await deploy("CapabilityRegistry", [usdc]);
   const executor = await deploy("Executor", [store, caps]);
+
+  const uni = await wireUniswapOnFork(pub as never, wallet as never, executor);
 
   console.log("\nwiring");
   await write(store, "GrantStore", "setExecutor", [executor]);
   await write(store, "GrantStore", "authorizeRegistry", [registry, ROOT]);
   await write(usdc, "MockERC20", "mint", [executor, 1000n * 10n ** 18n]);
-  await write(weth, "MockERC20", "mint", [swap, 1000n * 10n ** 18n]);
   await write(executor, "Executor", "setAllowance", [usdc, pool, 2n ** 256n - 1n]);
-  await write(executor, "Executor", "setAllowance", [usdc, swap, 2n ** 256n - 1n]);
+  await write(executor, "Executor", "setAllowance", [uni.weth, uni.router, 2n ** 256n - 1n]);
   await write(pool, "MockPool", "setDebt", [executor, 500n * 10n ** 18n]);
 
   const repaySel = toFunctionSelector("repay(address,uint256,uint256,address)");
   const supplySel = toFunctionSelector("supply(address,uint256,uint16,address)");
   const withdrawSel = toFunctionSelector("withdraw(address,uint256,address)");
-  const swapSel = toFunctionSelector("swap(address,uint256,uint256)");
   const healthSel = toFunctionSelector("healthFactor(address)");
   const approveSel = toFunctionSelector("approve(address,uint256)");
 
@@ -270,7 +272,13 @@ async function main() {
   await setCap(Cap.LEND_AAVE_REPAY, capSpec({ target: pool, selector: repaySel, amountArgIndex: 1 }));
   await setCap(Cap.LEND_AAVE_SUPPLY, capSpec({ target: pool, selector: supplySel, amountArgIndex: 1 }));
   await setCap(Cap.LEND_AAVE_WITHDRAW, capSpec({ target: pool, selector: withdrawSel, amountArgIndex: 1 }));
-  await setCap(Cap.SWAP_UNISWAP, capSpec({ target: swap, selector: swapSel, amountArgIndex: 1 }));
+  await setCap(Cap.SWAP_UNISWAP, capSpec({
+    target: uni.router,
+    selector: EXACT_INPUT_SINGLE_SELECTOR,
+    amountArgIndex: EXACT_INPUT_SINGLE_AMOUNT_INDEX,
+    pinnedArg: uni.weth,
+    pinnedArgIndex: EXACT_INPUT_SINGLE_TOKEN_IN_INDEX,
+  }));
   await setCap(Cap.DATA_GRAPH_READ, capSpec({
     target: pool, selector: healthSel, amountArgIndex: NO_AMOUNT, queryCost: 1, readSafe: true,
   }));
@@ -303,6 +311,7 @@ async function main() {
   const C_REPAY = 1n << BigInt(Cap.LEND_AAVE_REPAY);
   const C_APPROVE = 1n << BigInt(Cap.ERC20_APPROVE);
   const C_DELEGATE = 1n << BigInt(Cap.DELEGATE);
+  const C_SWAP = 1n << BigInt(Cap.SWAP_UNISWAP);
 
   const riskLabel = `risk${suffix}`;
   const execLabel = `exec${suffix}`;
@@ -324,7 +333,7 @@ async function main() {
   console.log(`  LabelStore.getLabel(tokenId) => "${stored}"`);
 
   const exec = await mint(registry, execLabel, account.address, grantTuple({
-    capabilities: C_REPAY | C_APPROVE | C_READ,
+    capabilities: C_SWAP | C_REPAY | C_APPROVE | C_READ,
     spendCap: eth("100"), queryBudget: 8n, expiry: hour, maxDepth: 0,
   }));
 
@@ -352,9 +361,15 @@ async function main() {
     factory,
     labels,
     usdc,
-    weth,
+    weth: uni.weth,
     pool,
-    swap,
+    swap: uni.router,
+    sepoliaUsdc: uni.usdc,
+    uniswapPool: uni.pool,
+    uniswapFee: uni.fee,
+    uniswapFactory: uni.factory,
+    swapKind: "uniswap-v3",
+    swapSeeded: uni.seeded,
     ensMockUsdc: ENSV2.mockUsdc,
     device: signer.address,
     mandateSigner: signer.kind,
