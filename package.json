@@ -15,6 +15,7 @@
     "web:build": "next build web",
     "chain": "anvil",
     "chain:fork": "bash -lc 'set -a; [ -f .env ] && . ./.env; set +a; anvil --fork-url \"${SEPOLIA_RPC_URL:-https://ethereum-sepolia.publicnode.com}\" --port 8545'",
+    "explorer": "docker run --rm --name attenuate-otterscan -p 5100:80 -e ERIGON_URL=http://127.0.0.1:8545 otterscan/otterscan:latest",
     "deploy:local": "tsx scripts/deploy-local.ts",
     "deploy:fork": "tsx scripts/deploy-fork.ts",
     "deploy:forge": "forge script --root contracts script/Deploy.s.sol:Deploy --rpc-url http://127.0.0.1:8545 --broadcast",

@@ -210,6 +210,7 @@ async function main() {
     );
   }
   console.log(`fork chainId ${chainId} (Sepolia)\n`);
+  const startBlock = Number(await pub.getBlockNumber());
 
   await fundAccounts();
   await verifyEnsv2();
@@ -353,6 +354,7 @@ async function main() {
   const out = {
     chainId: sepolia.id,
     forked: true,
+    startBlock,
     ensv2: ENSV2,
     store,
     caps,

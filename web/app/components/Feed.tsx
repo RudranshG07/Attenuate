@@ -1,7 +1,7 @@
 "use client";
 
 import s from "./tree.module.css";
-import { etherscan, type FeedItem } from "../lib/model";
+import { txUrl, type FeedItem } from "../lib/model";
 
 const KIND_CLASS: Record<string, string> = {
   blocked: s.kBlocked,
@@ -19,7 +19,7 @@ export function Feed({ items }: { items: FeedItem[] }) {
         <a
           key={i.id}
           className={s.item}
-          href={etherscan(i.txHash)}
+          href={txUrl(i.txHash, i.txUrl)}
           target="_blank"
           rel="noreferrer"
         >

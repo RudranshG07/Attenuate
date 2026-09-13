@@ -81,6 +81,7 @@ Against a fork of real Sepolia, using the live ENSv2 LabelStore and Uniswap V3:
 npm run chain:fork
 npm run deploy:fork   # wires swap.uniswap to SwapRouter02
 npm run swap:fork     # 0.01 WETH → Circle USDC through the Executor
+npm run explorer      # Otterscan at localhost:5100 → Anvil at 127.0.0.1:8545
 ```
 
 Emulated Ledger, no hardware needed:
