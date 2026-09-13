@@ -23,6 +23,7 @@
     "x402": "tsx scripts/x402-demo.ts",
     "reorg": "tsx scripts/reorg-demo.ts",
     "agent": "tsx scripts/agent.ts",
+    "health": "tsx scripts/set-health.ts",
     "plan": "tsx scripts/plan.ts",
     "smoke:fork": "DEPLOYMENT=fork tsx scripts/smoke.ts",
     "swap:fork": "DEPLOYMENT=fork tsx scripts/swap-fork.ts",

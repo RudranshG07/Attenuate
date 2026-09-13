@@ -175,6 +175,68 @@ so rather than let it read that way.
 `probe` is minted *by risk's key*, not the deployer's: risk is the registrar of the
 registry under its own name, and the deployer has no rights there at all.
 
+## The demo, in order
+
+Each step leaves the chain in the state the next one needs, so run them in this order.
+Two ordering notes are load-bearing: a name only *delegates* while health sits in the
+watch band, and it only gets *refused* once the position is critical — so the health
+change in the middle is not decoration. And `npm run smoke` mints from the root, so run
+it last or re-deploy after.
+
+```bash
+npm run speculos        # emulated Ledger; no hardware needed
+npm run chain           # anvil
+npm run deploy:local    # root mandate signed on the device, three-level tree seeded
+```
+
+```bash
+npx tsx examples/mcp-client.ts
+```
+
+An agent that imports nothing from this project: it discovers six tools over stdio,
+reads its own scope, asks for more than its parent has left, and is told which field to
+narrow before spending any gas.
+
+```bash
+ATTENUATE_AGENT_NAME=risk npm run agent
+```
+
+`risk` delegates, mints the child to a key derived for that name, funds it, and spawns
+it. The child prints a different pid and a different key, and the chain agrees it holds
+the name.
+
+```bash
+npm run health -- 0.4   # the position degrades
+
+ATTENUATE_AGENT_NAME=exec  npm run agent    # OVER_BUDGET, wants more than its cap
+ATTENUATE_AGENT_NAME=probe npm run agent    # CAP_MISSING, read-only leaf
+ATTENUATE_AGENT_SEED=someone-else ATTENUATE_AGENT_NAME=exec npm run agent
+```
+
+The third prints `holds false` and is refused `NOT_AGENT`. Fund that address first or it
+fails gas estimation instead, which looks like enforcement and is not — the agent says
+so rather than let it read that way.
+
+```bash
+npm run x402            # 40 paid calls, then the contract refuses the 41st
+npm run reorg           # anvil_reorg depth 3, detected and resumed
+npm run smoke           # grant, execute, refuse, revoke, reclaim
+npm run web             # the tree at localhost:3000
+```
+
+And the parts that are already live, with nothing running locally:
+
+```bash
+cast call 0x983c610f91Faa00949943a132650167bf41F440A \
+  'text(bytes32,string)(string)' $(cast namehash risk.attenuate.eth) grant.caps \
+  --rpc-url https://ethereum-sepolia-rpc.publicnode.com
+# "0xd4"
+
+curl -s https://api.studio.thegraph.com/query/1760226/atte/v0.0.1 \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"{ agents { label capabilities spendRemaining } }"}'
+```
+
 ## What each partner does here
 
 **ENS.** Every prior project in this space stored agent policy in ENS text records and enforced it somewhere else. We inherit `PermissionedRegistry`, override the mint, and use hierarchical registries as the delegation chain itself. Enhanced Access Control splits granting from revoking, and withholding `ROLE_CAN_TRANSFER_ADMIN` makes a permission non-sellable. No child ever receives `ROLE_SET_RESOLVER`, because an agent that can repoint its own resolver can rewrite the permissions its name publishes.

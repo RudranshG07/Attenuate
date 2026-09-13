@@ -13,6 +13,7 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { loadDeployment, publicClientFor } from "../broker/client.js";
+import { readPosition } from "../agent/monitor.js";
 import { agentKey } from "../agent/identity.js";
 import { fetchPaid, QueryBudgetExhausted } from "../broker/x402.js";
 
@@ -48,7 +49,14 @@ const server = createServer(async (req, res) => {
     return send(402, { error: "payment did not go through the executor" });
   }
   seen.add(paid);
-  send(200, { healthFactor: "1.30", source: "MockPool", paidWith: paid });
+  // Read it rather than quote it: a paid endpoint that serves a constant is a stub,
+  // and the number on screen should be the one the chain actually holds.
+  const pos = await readPosition(d.executor, d, pub);
+  send(200, {
+    healthFactor: pos.healthFactor.toFixed(3),
+    blockNumber: String(pos.blockNumber),
+    paidWith: paid,
+  });
 });
 
 async function main() {
@@ -59,10 +67,10 @@ async function main() {
 
   for (let i = 1; ; i++) {
     try {
-      const r = await fetchPaid<{ healthFactor: string }>(url, node);
+      const r = await fetchPaid<{ healthFactor: string; blockNumber: string }>(url, node);
       console.log(
-        `  call ${String(i).padStart(2)}  402 -> paid ${r.paid} -> ${r.data.healthFactor}` +
-        `   queryRemaining ${r.queryRemaining}`,
+        `  call ${String(i).padStart(2)}  402 -> paid ${r.paid} -> health ${r.data.healthFactor}` +
+        ` @ block ${r.data.blockNumber}   queryRemaining ${r.queryRemaining}`,
       );
       if (r.queryRemaining === 0n) continue;
     } catch (e) {
