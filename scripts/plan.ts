@@ -1,3 +1,4 @@
+import "./lib/load-env.js";
 /**
  * Runs the planner against a real chain and records what the registry did with each
  * proposal.
@@ -17,6 +18,7 @@ import { grantStoreAbi } from "../broker/abi.js";
 import { simulateGrant, tuple } from "../broker/grant.js";
 import { registryAbi } from "../broker/abi.js";
 import { readPosition } from "../agent/monitor.js";
+import { agentAddress, agentKey } from "../agent/identity.js";
 import { plannerStats, proposeChildGrant, recordOutcome } from "../agent/planner.js";
 import type { Grant } from "../agent/types.js";
 
@@ -64,17 +66,25 @@ async function main() {
     })) as bigint;
     if (parentOfRegistry !== parentNode) continue;
 
+    // A registry under a name is registrar-gated to that name's own key, so minting
+    // as the broker would fail authorisation and be recorded as a scope refusal it
+    // is not. The root registry is the broker's; everything below belongs to its name.
+    const asName = name === "root" ? undefined : name;
+    const caller = asName ? agentAddress(asName) : account;
+    const signer = asName ? walletClientFor(d, agentKey(asName)) : wallet;
+
     const p = await proposeChildGrant(position, parentNode, parent);
     const label = `${p.label}-${Math.random().toString(36).slice(2, 6)}`;
-    const sim = await simulateGrant(pub, registry, account, {
-      label, owner: account, resolver: account, grant: p.grant,
+    const owner = agentAddress(label);
+    const sim = await simulateGrant(pub, registry, caller, {
+      label, owner, resolver: owner, grant: p.grant,
     });
 
     let txHash: `0x${string}` | undefined;
     if (sim.ok) {
-      txHash = await wallet.writeContract({
+      txHash = await signer.writeContract({
         address: registry, abi: registryAbi, functionName: "registerWithGrant",
-        args: [label, account, account, tuple(p.grant)],
+        args: [label, owner, owner, tuple(p.grant)],
       } as never);
       await pub.waitForTransactionReceipt({ hash: txHash });
     }

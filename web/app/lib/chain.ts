@@ -35,9 +35,10 @@ function chain() {
 }
 
 function rpc() {
-  return process.env.RPC_URL ?? (TARGET === "local"
-    ? "http://127.0.0.1:8545"
-    : "https://ethereum-sepolia-rpc.publicnode.com");
+  if (process.env.RPC_URL) return process.env.RPC_URL;
+  // fork keeps Sepolia's chain id but the contracts live on local Anvil.
+  if (TARGET === "sepolia") return "https://ethereum-sepolia.publicnode.com";
+  return "http://127.0.0.1:8545";
 }
 
 export function abiOf(name: string) {
@@ -63,6 +64,12 @@ export const RANGE = {
   fromBlock: BigInt(deployment().startBlock ?? 0),
   toBlock: "latest",
 } as const;
+
+export function explorerTx(hash: string) {
+  if (TARGET === "sepolia") return `https://sepolia.etherscan.io/tx/${hash}`;
+  const base = (process.env.ATTENUATE_EXPLORER_URL ?? "http://localhost:5100").replace(/\/$/, "");
+  return `${base}/tx/${hash}`;
+}
 
 export const CAPS = [
   "swap.uniswap", "lend.aave.supply", "lend.aave.repay", "lend.aave.withdraw",

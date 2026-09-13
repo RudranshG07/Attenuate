@@ -230,7 +230,10 @@ export function plannerStats(path = LOG): PlannerStats {
     proposed: rows.length,
     accepted,
     blocked: rows.length - accepted,
-    reachedExecution: rows.filter((r) => r.accepted && r.txHash).length,
+    // Of the *refused* proposals, how many nonetheless produced a transaction.
+    // Structurally zero, because a refused grant never mints and so has nothing to
+    // execute with. Counted rather than asserted so the claim can be falsified.
+    reachedExecution: rows.filter((r) => !r.accepted && r.txHash).length,
     byReason,
   };
 }

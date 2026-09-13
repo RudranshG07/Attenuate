@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { RANGE, ago, client, decodeCaps, deployment, events, usdc } from "../../lib/chain";
+import { RANGE, ago, client, decodeCaps, deployment, events, explorerTx, usdc } from "../../lib/chain";
 
 export const dynamic = "force-dynamic";
 
@@ -103,7 +103,7 @@ export async function GET() {
     rows.sort((a, b) => Number(b.block - a.block));
     return NextResponse.json({
       connected: true,
-      items: rows.map(({ block, ...r }) => r),
+      items: rows.map(({ block, ...r }) => ({ ...r, txUrl: explorerTx(r.txHash) })),
     });
   } catch {
     return NextResponse.json({ connected: false, items: [] });

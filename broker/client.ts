@@ -1,3 +1,4 @@
+import "./../scripts/lib/load-env.js";
 import { createPublicClient, createWalletClient, http, type Address, type Chain } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { foundry } from "viem/chains";

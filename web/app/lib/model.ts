@@ -23,6 +23,7 @@ export interface FeedItem {
   detail: string;
   reason?: string;
   txHash: string;
+  txUrl?: string;
   at: string;
 }
 
@@ -37,6 +38,10 @@ export const CAP_LABEL: Record<string, string> = {
   delegate: "delegate",
 };
 
-export function etherscan(hash: string) {
-  return `https://sepolia.etherscan.io/tx/${hash}`;
+export function txUrl(hash: string, href?: string) {
+  if (href) return href;
+  const target = process.env.ATTENUATE_DEPLOYMENT ?? "local";
+  if (target === "sepolia") return `https://sepolia.etherscan.io/tx/${hash}`;
+  const base = (process.env.ATTENUATE_EXPLORER_URL ?? "http://localhost:5100").replace(/\/$/, "");
+  return `${base}/tx/${hash}`;
 }

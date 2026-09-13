@@ -64,6 +64,8 @@ const FIELD: Record<string, string> = {
   PARENT_DEAD: "parent",
   NOT_GRANTOR: "caller",
   EXISTS: "label",
+  // EAC's own error, raised before any attenuation check runs.
+  EACUnauthorizedAccountRoles: "caller",
 };
 
 function reasonFrom(err: unknown): string {

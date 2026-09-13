@@ -342,11 +342,11 @@ whatever it asks for goes straight to `registerWithGrant`.
 GEMINI_API_KEY=... npm run plan     # ANTHROPIC_API_KEY also works
 ```
 
-Our run, against `gemini-3.6-flash` on positions from a health factor of 0 with debt
-ranging from 500 to 5000 USDC:
+Our run, against `gemini-3.6-flash`, across a position at health 1.30 and the same
+position degraded to 0.13:
 
 ```
-proposed 4 · accepted 4 · blocked 0 · reached execution 0
+proposed 5 · accepted 5 · blocked 0 · reached execution 0
 ```
 
 **The model never exceeded its scope.** It is told the parent's `spendRemaining` and it
@@ -360,9 +360,11 @@ The enforcement evidence is therefore not anecdotal. `contracts/test/Escalation.
 is 21 tests, one per way a child can try to exceed its parent, and all 21 are refused
 at mint time. That is exhaustive where a model run is a sample.
 
-`reachedExecution` counts accepted proposals that produced a mint transaction.
-Out-of-scope proposals stay at zero because the name is never minted. That refusal
-does not depend on which model proposed, or on how well it behaved on the day.
+`reachedExecution` counts *refused* proposals that nonetheless produced a transaction.
+It is structurally zero rather than luckily zero — a refused grant never mints, so
+there is nothing to execute with — but we count it rather than assert it, so the claim
+is falsifiable from the log instead of taken on trust. That refusal does not depend on
+which model proposed, or on how well it behaved on the day.
 
 The design line worth stating: structured output constrains the *shape* of the model's
 reply so it always parses, and deliberately **not** the scope. Filtering the proposal
