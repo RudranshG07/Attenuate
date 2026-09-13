@@ -145,3 +145,24 @@ export const CAPABILITIES = [
 export function decodeCapabilities(mask: bigint): string[] {
   return CAPABILITIES.filter((_, i) => (mask >> BigInt(i)) & 1n);
 }
+
+/**
+ * Accept capabilities the way they are read back: as names. A caller that already has
+ * a bitmask can still pass one, but nobody should have to know our bit positions to
+ * use the MCP server, and `check_scope` reports names — so the two have to meet.
+ */
+export function encodeCapabilities(input: string | readonly string[]): bigint {
+  if (typeof input === "string" && /^(0x)?[0-9]+$/.test(input.trim())) {
+    return BigInt(input.trim());
+  }
+  const names = typeof input === "string" ? input.split(/[,\s]+/).filter(Boolean) : input;
+  let mask = 0n;
+  for (const n of names) {
+    const i = CAPABILITIES.indexOf(n.trim() as (typeof CAPABILITIES)[number]);
+    if (i < 0) {
+      throw new Error(`unknown capability "${n}". Known: ${CAPABILITIES.join(", ")}`);
+    }
+    mask |= 1n << BigInt(i);
+  }
+  return mask;
+}

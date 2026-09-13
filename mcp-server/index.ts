@@ -12,13 +12,15 @@ export const TOOLS = [
   "simulate_grant",
 ] as const;
 
+// Capability names, the same strings check_scope reports, or a bitmask for callers
+// that already have one. readOnly defaults to false so the common case is shorter.
 const grantSchema = {
-  capabilities: z.string(),
+  capabilities: z.union([z.string(), z.array(z.string())]),
   spendCap: z.string(),
   queryBudget: z.string(),
   expiry: z.number().int(),
   maxDepth: z.number().int().nonnegative(),
-  readOnly: z.boolean(),
+  readOnly: z.boolean().optional(),
 };
 
 // Every tool returns JSON so an agent can act on the reason, not just read it.

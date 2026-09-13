@@ -1,29 +1,32 @@
 import { encodeFunctionData, parseUnits, type Address } from "viem";
 import { capabilityRegistryAbi, executorAbi, grantStoreAbi, registryAbi } from "../broker/abi.js";
 import { walletClientFor } from "../broker/client.js";
-import { newGrant, simulateGrant, tuple } from "../broker/grant.js";
+import { encodeCapabilities, newGrant, simulateGrant, tuple } from "../broker/grant.js";
 import { Cap, type Grant } from "../broker/types.js";
 import { deviceAvailable, requestApproval } from "../broker/keyring.js";
 import { readPosition } from "../agent/monitor.js";
 import { requireNode, snapshot, type Node } from "./tree.js";
 
 export interface GrantInput {
-  capabilities: string;
+  capabilities: string | string[];
   spendCap: string;
   queryBudget: string;
   expiry: number;
   maxDepth: number;
-  readOnly: boolean;
+  readOnly?: boolean;
 }
 
+// Amounts go in the same units check_scope reports them in. Taking wei here while
+// reporting whole tokens there means an agent that feeds a reading straight back asks
+// for 1e18 times too little and is quietly approved, which is worse than an error.
 function toGrant(g: GrantInput): Grant {
   return newGrant({
-    capabilities: BigInt(g.capabilities),
-    spendCap: BigInt(g.spendCap),
+    capabilities: encodeCapabilities(g.capabilities),
+    spendCap: parseUnits(String(g.spendCap), 18),
     queryBudget: BigInt(g.queryBudget),
     expiry: BigInt(g.expiry),
     maxDepth: g.maxDepth,
-    readOnly: g.readOnly,
+    readOnly: g.readOnly ?? false,
   });
 }
 

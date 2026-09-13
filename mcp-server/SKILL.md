@@ -142,18 +142,24 @@ npx @attenuate/mcp-server
 
 Dry-run a proposed grant. Returns the named reason it would be refused. Costs nothing.
 
+Capabilities are the same names `check_scope` reports, and amounts are in the same
+whole-token units it reports them in, so a reading can be fed straight back without
+knowing bit positions or decimals. A bitmask string still works if you have one, and
+`readOnly` defaults to false.
+
 **Call this before `grant_capability`, every time.** A refused grant is a wasted transaction and a wasted block of latency, and the reason string tells you exactly which field to narrow. It is also the right tool when a model proposes a grant: check first, then act.
 
 ```
-Input:  { parent: "agent.eth",
-          grant: { capabilities: "0x04", spendCap: "500000000",
-                   queryBudget: "1000", expiry: 1757462400,
-                   maxDepth: 0, readOnly: false } }
+Input:  { parent: "risk.attenuate.eth",
+          grant: { capabilities: ["lend.aave.repay", "erc20.approve"],
+                   spendCap: "9999", queryBudget: "1",
+                   expiry: 1789298161, maxDepth: 0 } }
 
 Output: { ok: false,
           reason: "CAP_EXCEEDS_UNALLOCATED",
           field: "spendCap",
-          parentRemaining: "250000000" }
+          parent: "risk.attenuate.eth",
+          parentRemaining: "250" }
 ```
 
 ### `grant_capability`
