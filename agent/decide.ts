@@ -65,11 +65,16 @@ export function decide(h: PositionHealth, grant: Grant): Decision {
 // Sub-agents are separate OS processes with their own keys resolving to their own
 // names. A function call with a name attached inherits the parent's authority and
 // makes the whole model theatre.
-export async function spawnSubAgent(name: string, node: bigint): Promise<void> {
+export async function spawnSubAgent(name: string, node: bigint, capability?: string): Promise<void> {
   const { spawn } = await import("node:child_process");
   const child = spawn("npx", ["tsx", "scripts/agent.ts"], {
     stdio: "inherit",
-    env: { ...process.env, ATTENUATE_AGENT_NAME: name, ATTENUATE_AGENT_NODE: node.toString() },
+    env: {
+      ...process.env,
+      ATTENUATE_AGENT_NAME: name,
+      ATTENUATE_AGENT_NODE: node.toString(),
+      ...(capability ? { ATTENUATE_CAPABILITY: capability } : {}),
+    },
     detached: false,
   });
   await new Promise<void>((res, rej) => {

@@ -84,6 +84,20 @@ npm run swap:fork     # 0.01 WETH → Circle USDC through the Executor
 npm run explorer      # Otterscan at localhost:5100 → Anvil at 127.0.0.1:8545
 ```
 
+The Ledger Key Ring, if you have a device:
+
+```bash
+npm run ring          # which of three states you are in, and what to do next
+npm run ring init     # provision the trustchain; needs a device, once
+npm run ring demo     # seal a scoped capability and open it again
+```
+
+`ring init` is the only step that needs hardware. After it, the trustchain restores over
+the network and a parent that delegates also seals a short-lived capability for its
+child, so the sub-agent holds a capability that expires rather than a key that does not.
+Without a ring the on-chain grant still governs everything; the ring adds the off-chain
+half.
+
 Emulated Ledger, no hardware needed:
 
 ```bash

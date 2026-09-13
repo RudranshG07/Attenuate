@@ -10,7 +10,8 @@ import { decodeEventLog, encodeFunctionData, parseAbi } from "viem";
 import { grantStoreAbi, registryAbi, executorAbi } from "../broker/abi.js";
 import { loadDeployment, publicClientFor, walletClientFor } from "../broker/client.js";
 import { newGrant, tuple } from "../broker/grant.js";
-import { deviceAvailable, requestApproval } from "../broker/keyring.js";
+import { deviceAvailable, requestApproval, ringStatus } from "../broker/keyring.js";
+import { openCapability, releaseCapability } from "../broker/secrets.js";
 import { Cap, type Grant } from "../broker/types.js";
 import { decide, spawnSubAgent } from "../agent/decide.js";
 import { agentAddress, agentKey } from "../agent/identity.js";
@@ -67,6 +68,15 @@ async function cycle() {
 
   const grant = await grantOf(d.store, node, pub);
   if (grant.epoch === 0n) throw new Error(`no grant at node ${node}`);
+
+  // Handed down by the parent. Opening it proves the ring released it to us and that
+  // it has not expired; it carries a scope, never a key.
+  if (process.env.ATTENUATE_CAPABILITY) {
+    const cap = await openCapability(process.env.ATTENUATE_CAPABILITY, {
+      key: process.env.RING_KEY ?? "attenuate",
+    });
+    console.log(`  opened a sealed capability: capBit ${cap.capBit}, expires ${cap.expiresAt}`);
+  }
 
   // Printed every cycle because it is the claim: this process, this key, this name.
   const holder = (await pub.readContract({
@@ -155,7 +165,20 @@ async function cycle() {
       await pub.waitForTransactionReceipt({ hash: funded });
       console.log(`  funded ${label} with 0.1 ETH for its own gas`);
     }
-    await spawnSubAgent(label, childNode);
+
+    // With a Key Ring provisioned, the child is also handed a sealed, expiring
+    // capability rather than anything it could reuse. Without one the on-chain grant
+    // still governs it; the ring adds an off-chain secret the child never has to hold.
+    const ring = await ringStatus();
+    let sealed: string | undefined;
+    if (ring.state === "ready") {
+      const cap = await releaseCapability(childNode, decision.readOnly
+        ? Cap.DATA_GRAPH_READ : Cap.LEND_AAVE_REPAY, 300, { key: process.env.RING_KEY ?? "attenuate" });
+      sealed = cap.token;
+      console.log(`  sealed a 5-minute capability for ${label} on the Key Ring`);
+    }
+
+    await spawnSubAgent(label, childNode, sealed);
     return;
   }
 

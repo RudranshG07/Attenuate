@@ -24,7 +24,29 @@ the limitation the next section is about.
 spend cap, query budget, expiry and delegation depth for the entire tree. Everything
 below is a strict subset, enforced in the registry contract. `broker/mandate.ts`.
 
-**2. Scoped secret release.** `wallet-cli ring encrypt/decrypt` seals a short-lived,
+**2. Scoped secret release — plug a device in and it turns on.** `npm run ring` reports
+which of three states you are in and what to do next, `npm run ring init` provisions the
+trustchain, and from then on a parent that delegates also seals a five-minute capability
+for its child on the Key Ring:
+
+```
+  delegated riskiq28 -> 7952622527…
+  funded riskiq28 with 0.1 ETH for its own gas
+  sealed a 5-minute capability for riskiq28 on the Key Ring
+riskiq28  opened a sealed capability: capBit 6, expires 1789301882
+```
+
+The child opens it, uses it, and never holds a key. Hardware is needed exactly once, at
+`ring init`; after that the trustchain restores over the network and the device can be
+unplugged. We had no device, so the sealing and expiry logic is tested against a
+stand-in CLI (`npm run test:keyring`, 10 tests) and the wiring is live the moment a real
+ring exists.
+
+Writing that path is what found the bug in our own CLI wrapper: `ring decrypt` returns
+plaintext, ours is JSON, and we were treating any JSON output as a result envelope — so
+every decrypt would have failed on real hardware. The stand-in caught it.
+
+**2b. The original ask.** `wallet-cli ring encrypt/decrypt` seals a short-lived,
 scope-bound token for a sub-agent, so the sub-agent receives a capability and never a
 key — the track brief's own sentence. `broker/secrets.ts` is written against the CLI,
 but we cannot show it running: a ring has to be created by `ring init`, which requires
@@ -46,7 +68,11 @@ either way.
 This was the part we most wanted to build, and the part with the least prior art.
 
 `ring init` requires a device on the machine, so a VPS can never become a trustchain
-member. The `WALLET_PASS` pattern in the docs covers a machine that is *already*
+member — and neither can a laptop without a Nano. We confirmed this is a transport gap
+rather than a physics one: the CLI binary ships `SPECULOS_API_PORT` and
+`SPECULOS_DEVICE`, but its only transport is `UsbTransport`, so setting them still
+returns "No Ledger device found" against a running emulator. `FEEDBACK.md` item 9 has
+the full reproduction. The `WALLET_PASS` pattern in the docs covers a machine that is *already*
 enrolled, which is a different problem.
 
 So we stopped trying to move the ring. The ring stays on the operator's machine. The

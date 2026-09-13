@@ -202,6 +202,66 @@ A refusal is the feature working, not a fault, and the message reads like a faul
 the natural `catch` treats a deliberate human decision as a crash. We match on the
 code now, but something like `UserRejectedError` would make the distinction obvious.
 
+### 9. `wallet-cli ring` has Speculos support compiled in, but discovery is USB-only
+
+This is the one that decides whether a team without hardware can enter at all, so it is
+worth being precise about.
+
+`ring init` is the gate — `encrypt` and `decrypt` need a trustchain that only `init`
+can create — and it says:
+
+```
+init   Set up this machine as a Ledger Key Ring member, creating or
+       recovering a trustchain (device required).
+```
+
+The binary already knows about the emulator. These strings are in
+`@ledgerhq/wallet-cli-darwin-arm64`:
+
+```
+SPECULOS_API_PORT
+SPECULOS_DEVICE
+SPECULOS_FIRMWARE_VERSION
+SPECULOS_USE_WEBSOCKET
+```
+
+But setting them changes nothing, because the only transport in the bundle is
+`UsbTransport`:
+
+```
+$ SPECULOS_API_PORT=5001 SPECULOS_DEVICE=nanoX wallet-cli ring init
+{"ok":false,"error":{"code":"unknown",
+ "message":"No Ledger device found. Unlock the device and try again."}}
+```
+
+Speculos was running and answering on 5001 at the time, with the Ethereum app loaded and
+blind signing on — the same emulator our EIP-712 mandate signs against through DMK's
+`speculosTransportFactory`. So the gap is not that emulation is impossible; DMK already
+does it. It is that the Key Ring CLI does not offer the transport DMK already has.
+
+**Why it matters beyond us.** The track brief makes `wallet-cli ring` the eligibility
+requirement. Any team without a physical Nano is therefore blocked from the headline
+requirement on day one, and cannot find that out from the docs — only by installing the
+CLI and reading `--help`. Four teams asked in Discord over four days whether Speculos
+was acceptable and none got an answer.
+
+**Concrete fix, in the order we would want it:**
+
+1. Wire `speculosTransportFactory` into the CLI's discovery behind the
+   `SPECULOS_API_PORT` variable the binary already ships. This looks like a small change
+   given DMK already exposes it.
+2. Failing that, say so on the ETHOnline page: *"a physical device is required for
+   `ring init`; Speculos covers app signing but not trustchain membership."* One
+   sentence would have changed how we spent our first day.
+3. The error text could name the real constraint. "No Ledger device found" reads like a
+   cable problem, and sent us to check the emulator, the app, and the USB stack before
+   we thought to check whether the transport existed at all.
+
+**What we did instead.** We left the ring on the operator's machine and gave a remote
+host short-lived sealed secrets after a device-signed approval over a fingerprint the
+operator reads off the screen — `keyring-remote/enroll.ts`, tested. That is a real
+answer to a real limitation, but it is an answer we were forced into, not one we chose.
+
 ## Open questions, now answered
 
 **Headless enrolment on a host with no USB port.** This is the track's second ask and

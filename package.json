@@ -29,6 +29,7 @@
     "swap:fork": "DEPLOYMENT=fork tsx scripts/swap-fork.ts",
     "speculos": "./scripts/speculos.sh",
     "speculos:approve": "tsx scripts/speculos-approve.ts",
+    "ring": "tsx scripts/ring.ts",
     "subgraph:codegen": "cd subgraph && graph codegen",
     "subgraph:build": "cd subgraph && graph build",
     "subgraph:deploy": "cd subgraph && graph auth \"$GRAPH_STUDIO_API_KEY\" && graph deploy ${SUBGRAPH_SLUG:-atte}"
@@ -36,7 +37,6 @@
   "packageManager": "npm@10.9.0",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.125.0",
-    "@ledgerhq/wallet-cli": "^2.1.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@substreams/core": "^0.17.0",
     "@substreams/manifest": "^0.16.0",
@@ -52,6 +52,7 @@
     "@ledgerhq/device-management-kit": "^1.9.0",
     "@ledgerhq/device-signer-kit-ethereum": "^1.18.0",
     "@ledgerhq/device-transport-kit-speculos": "^1.2.1",
+    "@ledgerhq/wallet-cli": "^2.1.0",
     "@types/node": "^22.0.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",

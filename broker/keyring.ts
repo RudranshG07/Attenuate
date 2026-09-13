@@ -1,6 +1,13 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 
-const BIN = process.env.WALLET_CLI ?? "wallet-cli";
+// Prefer the copy vendored with the project so a fresh clone has it, and let an
+// operator point at their own install. Resolved per call rather than at import, so
+// setting WALLET_CLI after load still takes effect.
+const LOCAL = new URL("../node_modules/.bin/wallet-cli", import.meta.url).pathname;
+function bin(): string {
+  return process.env.WALLET_CLI ?? (existsSync(LOCAL) ? LOCAL : "wallet-cli");
+}
 
 export interface RingOptions {
   key: string;
@@ -23,15 +30,19 @@ function parse(stdout: string): CliResult {
   const i = stdout.indexOf("{");
   if (i === -1) return { ok: true, data: stdout.trim() };
   try {
-    return JSON.parse(stdout.slice(i)) as CliResult;
+    const parsed = JSON.parse(stdout.slice(i)) as Partial<CliResult>;
+    // Only an envelope carries `ok`. `ring decrypt` returns the plaintext, and ours is
+    // itself JSON, so treating any object as a result would fail every decrypt.
+    if (typeof parsed?.ok === "boolean") return parsed as CliResult;
   } catch {
-    return { ok: true, data: stdout.trim() };
+    // not JSON at all
   }
+  return { ok: true, data: stdout.trim() };
 }
 
 function exec(args: string[], stdin?: string, o?: RingOptions): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = execFile(BIN, args, { env: env(o) }, (err, stdout) => {
+    const child = execFile(bin(), args, { env: env(o) }, (err, stdout) => {
       const res = parse(stdout ?? "");
       if (!res.ok) return reject(new Error(res.error?.message ?? "wallet-cli failed"));
       if (err && !stdout) return reject(err);
@@ -48,13 +59,43 @@ export async function listKeys(): Promise<string[]> {
   return d?.keys ?? [];
 }
 
-export async function isRingInitialised(): Promise<boolean> {
+export type RingState = "ready" | "uninitialised" | "no-cli";
+
+export interface RingStatus {
+  state: RingState;
+  keys: string[];
+  /** What an operator should do next, in one line. */
+  hint: string;
+}
+
+/**
+ * The three states worth telling apart, because the fix differs for each. A ring is
+ * provisioned by `ring init`, which needs a device on the machine; after that the
+ * device can be unplugged and encrypt/decrypt restore the trustchain over the network.
+ */
+export async function ringStatus(): Promise<RingStatus> {
   try {
-    await listKeys();
-    return true;
-  } catch {
-    return false;
+    const keys = await listKeys();
+    return { state: "ready", keys, hint: "" };
+  } catch (e) {
+    const m = e instanceof Error ? e.message : String(e);
+    if (/ENOENT|not found|spawn/i.test(m) && !/Key Ring/i.test(m)) {
+      return {
+        state: "no-cli",
+        keys: [],
+        hint: "wallet-cli is not installed. `npm i -D @ledgerhq/wallet-cli`.",
+      };
+    }
+    return {
+      state: "uninitialised",
+      keys: [],
+      hint: "Plug in a Ledger, unlock it, then run `npm run ring init`.",
+    };
   }
+}
+
+export async function isRingInitialised(): Promise<boolean> {
+  return (await ringStatus()).state === "ready";
 }
 
 export async function encrypt(plaintext: string, o: RingOptions): Promise<string> {

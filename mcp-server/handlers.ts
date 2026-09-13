@@ -30,6 +30,8 @@ function toGrant(g: GrantInput): Grant {
   });
 }
 
+export const SUBGRAPH_URL = "https://api.studio.thegraph.com/query/1760226/atte/v0.0.1";
+
 const asUsdc = (v: bigint) => `${Number(v / 10n ** 16n) / 100}`;
 
 function describe(n: Node) {
@@ -212,8 +214,12 @@ export async function query_position(a: { name: string; protocol: string; accoun
     queryRemaining = after.queryRemaining;
   }
 
+  // The paid read answers from two places at once: the chain for the position, and
+  // our subgraph for what the tree has been doing. Defaulted to the deployed endpoint
+  // so a caller gets Graph data without configuring anything; set the env var to point
+  // at your own deployment.
   let subgraph: unknown;
-  const url = process.env.GRAPH_SUBGRAPH_URL;
+  const url = process.env.GRAPH_SUBGRAPH_URL ?? SUBGRAPH_URL;
   if (url) {
     const res = await fetch(url, {
       method: "POST",
