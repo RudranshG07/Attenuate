@@ -230,8 +230,7 @@ export function plannerStats(path = LOG): PlannerStats {
     proposed: rows.length,
     accepted,
     blocked: rows.length - accepted,
-    // An out-of-scope grant can never execute, because the name is never minted.
-    reachedExecution: 0,
+    reachedExecution: rows.filter((r) => r.accepted && r.txHash).length,
     byReason,
   };
 }

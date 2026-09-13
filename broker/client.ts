@@ -14,13 +14,22 @@ export interface Deployment {
   labels: Address;
   usdc: Address;
   pool: Address;
+  swap?: Address;
+  weth?: Address;
+  sepoliaUsdc?: Address;
+  uniswapPool?: Address;
+  uniswapFee?: number;
+  uniswapFactory?: Address;
+  swapKind?: "uniswap-v3" | "mock";
+  swapSeeded?: boolean;
   device: Address;
   revoker: Address;
   rootAgent: Address;
   root: string;
+  mandateSigner?: "device" | "software";
   // Block the deployment landed in; log scans start here.
   startBlock?: number;
-  // Populated after the demo tree is seeded.
+  // Populated after the tree is seeded.
   risk?: string;
   exec?: string;
   probe?: string;

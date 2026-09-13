@@ -12,6 +12,7 @@ import {SubregistryFactory} from "../src/SubregistryFactory.sol";
 import {MockERC20} from "../src/mocks/MockERC20.sol";
 import {MockLabelStore} from "../src/mocks/MockLabelStore.sol";
 import {MockPool} from "../src/mocks/MockPool.sol";
+import {MockSwap} from "../src/mocks/MockSwap.sol";
 
 // Local / anvil deploy in the order the contracts require:
 //   LabelStore → GrantStore → Factory → root registry → mock asset + pool →
@@ -23,6 +24,7 @@ contract Deploy is Script {
     uint8 constant SWAP = 0;
     uint8 constant SUPPLY = 1;
     uint8 constant REPAY = 2;
+    uint8 constant WITHDRAW = 3;
     uint8 constant APPROVE = 4;
     uint8 constant READ = 6;
 
@@ -32,7 +34,9 @@ contract Deploy is Script {
         address factory;
         address registry;
         address usdc;
+        address weth;
         address pool;
+        address swap;
         address caps;
         address executor;
     }
@@ -64,7 +68,9 @@ contract Deploy is Script {
         registry.grantRootRoles(RegistryRolesLib.ROLE_UNREGISTER, revoker);
 
         MockERC20 usdc = new MockERC20("Mock USDC", "USDC", 18);
+        MockERC20 weth = new MockERC20("Mock WETH", "WETH", 18);
         MockPool pool = new MockPool(usdc);
+        MockSwap swapper = new MockSwap(usdc, weth);
         CapabilityRegistry caps = new CapabilityRegistry(address(usdc));
         Executor executor = new Executor(store, caps);
 
@@ -73,7 +79,9 @@ contract Deploy is Script {
         a.factory = address(factory);
         a.registry = address(registry);
         a.usdc = address(usdc);
+        a.weth = address(weth);
         a.pool = address(pool);
+        a.swap = address(swapper);
         a.caps = address(caps);
         a.executor = address(executor);
     }
@@ -82,16 +90,19 @@ contract Deploy is Script {
         GrantStore store = GrantStore(a.store);
         Executor executor = Executor(payable(a.executor));
         MockERC20 usdc = MockERC20(a.usdc);
+        MockERC20 weth = MockERC20(a.weth);
         MockPool pool = MockPool(a.pool);
 
         store.setExecutor(a.executor);
         store.authorizeRegistry(a.registry, ROOT);
 
         usdc.mint(a.executor, 1000 ether);
+        weth.mint(a.swap, 1000 ether);
         executor.setAllowance(a.usdc, a.pool, type(uint256).max);
+        executor.setAllowance(a.usdc, a.swap, type(uint256).max);
         pool.setDebt(a.executor, 500 ether);
 
-        _configureCaps(CapabilityRegistry(a.caps), usdc, pool);
+        _configureCaps(CapabilityRegistry(a.caps), usdc, pool, MockSwap(a.swap));
     }
 
     function _seedRoot(GrantStore store, uint256 pk, address rootAgent) internal {
@@ -110,10 +121,13 @@ contract Deploy is Script {
         store.setRootAgent(ROOT, rootAgent);
     }
 
-    function _configureCaps(CapabilityRegistry caps, MockERC20 usdc, MockPool pool) internal {
+    function _configureCaps(CapabilityRegistry caps, MockERC20 usdc, MockPool pool, MockSwap swapper)
+        internal
+    {
         caps.setCap(REPAY, _spend(address(pool), MockPool.repay.selector));
         caps.setCap(SUPPLY, _spend(address(pool), MockPool.supply.selector));
-        caps.setCap(SWAP, _spend(address(pool), MockPool.repay.selector));
+        caps.setCap(WITHDRAW, _spend(address(pool), MockPool.withdraw.selector));
+        caps.setCap(SWAP, _spend(address(swapper), MockSwap.swap.selector));
 
         CapabilityRegistry.CapSpec memory read;
         read.target = address(pool);
@@ -146,7 +160,9 @@ contract Deploy is Script {
         console2.log("factory", a.factory);
         console2.log("registry", a.registry);
         console2.log("usdc", a.usdc);
+        console2.log("weth", a.weth);
         console2.log("pool", a.pool);
+        console2.log("swap", a.swap);
         console2.log("caps", a.caps);
         console2.log("executor", a.executor);
         console2.log("device", device);

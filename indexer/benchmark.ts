@@ -49,30 +49,33 @@ export async function run(
 
   let stopped = false;
 
-  // Push side: notified as the head moves.
+  // Fast head-watch. HTTP RPCs cannot push; this is a 100ms poll whose lag is
+  // measured against the block timestamp, not assumed to be zero.
   const unwatch = client.watchBlockNumber({
     emitOnBegin: true,
     poll: true,
     pollingInterval: 100,
-    onBlockNumber: (n) => {
+    onBlockNumber: async (n) => {
       const k = n.toString();
       if (seenByPush.has(k)) return;
       seenByPush.add(k);
-      arrivedAt.set(k, Date.now());
-      pushLag.push(0);
+      const now = Date.now();
+      arrivedAt.set(k, now);
+      const block = await client.getBlock({ blockNumber: n });
+      pushLag.push(Math.max(0, now - Number(block.timestamp) * 1000));
     },
   });
 
   // Polling side: only looks every pollingIntervalMs, so it learns late and can
-  // skip intermediate blocks entirely.
+  // skip intermediate blocks entirely. Lag is also vs the block timestamp.
   const poller = setInterval(async () => {
     if (stopped) return;
     const head = await client.getBlockNumber();
     const k = head.toString();
     if (seenByPoll.has(k)) return;
     seenByPoll.add(k);
-    const first = arrivedAt.get(k);
-    pollLag.push(first ? Date.now() - first : cfg.pollingIntervalMs);
+    const block = await client.getBlock({ blockNumber: head });
+    pollLag.push(Math.max(0, Date.now() - Number(block.timestamp) * 1000));
   }, cfg.pollingIntervalMs);
 
   const started = Date.now();

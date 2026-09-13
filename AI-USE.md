@@ -9,14 +9,14 @@ files, and who authored what.
 |---|---|
 | Claude Code (Claude Opus 5) | Paired with on ENS and Ledger integration, the broker, the MCP server handlers, the planner, the subgraph and the web app. Also used to research ENSv2 and the Ledger stack against source, and to review contract changes. |
 | Cursor | Jnyandeep paired with it to research ENSv2 against `ensdomains/contracts-v2` (there is no official `IENSv2` interface), restore the Foundry build, make delegation structural via `SubregistryFactory`, fill the escalation / conservation / gas suites, and get a working local and Sepolia-fork deploy path. |
-| Claude Opus 5 via the API | Runtime component, not a build tool: `agent/planner.ts` calls it to propose a child grant. See the note below. |
+| Gemini 3.6 Flash via the API | Runtime component, not a build tool: `agent/planner.ts` calls it to propose a child grant. The planner also supports Claude through `ANTHROPIC_API_KEY`; whichever key is present is used. See the note below. |
 
 ## By directory
 
 | Path | Author | AI involvement |
 |---|---|---|
 | `contracts/src/` | Jnyandeep | Early skeletons and `GrantStore` started with Claude Code. The current shape — `SubregistryFactory`, factory-deployed child registries, `revokeGrant`, query metering, and the role split — paired with Cursor after reading ENSv2 source. Judgement calls (a registry cannot embed its own initcode; withhold `ROLE_SET_RESOLVER` / `ROLE_SET_SUBREGISTRY` on children) were Jnyandeep's. |
-| `contracts/src/interfaces/IENSv2.sol` | Jnyandeep | Cursor confirmed there is no official `IENSv2`; the live types are `IRegistry` / `IPermissionedRegistry`. The leftover placeholder is unused. |
+| `contracts/src/interfaces/IENSv2.sol` | Jnyandeep | Cursor confirmed there is no official `IENSv2`; the leftover placeholder was deleted. Live types are `IRegistry` / `IPermissionedRegistry`. |
 | `contracts/test/` | Jnyandeep | `Attenuation.t.sol` started with Claude Code. Escalation suite (21 named scenarios with the revert the contract actually emits), conservation invariant, gas harness, and the rewritten depth-2 delegation tests paired with Cursor. |
 | `contracts/script/` | Jnyandeep | `Deploy.s.sol` paired with Cursor. |
 | `contracts/foundry.toml` | Jnyandeep | ENSv2 remappings and `skip = ["lib/**"]` paired with Cursor so a nested `contracts-v2` checkout does not get compiled as ours. |
@@ -30,7 +30,7 @@ files, and who authored what.
 | `indexer/` | Adish7Pandya, RudyG07 | Benchmark shape by Adish7Pandya; Substreams / head trigger and the push-vs-polling harness paired with Claude Code. |
 | `subgraph/` | RudyG07 | Paired with Claude Code. |
 | `web/` | RudyG07 | Paired with Claude Code. |
-| `scripts/` | RudyG07, Jnyandeep | `speculos.sh` and the first `deploy-local.ts` paired with Claude Code. Current `deploy-local.ts`, `deploy-fork.ts` and `smoke.ts` rewritten with Cursor so a three-level tree actually deploys and the Sepolia fork talks to live ENSv2. |
+| `scripts/` | RudyG07, Jnyandeep | `speculos.sh` and the first `deploy-local.ts` paired with Claude Code. Current `deploy-local.ts`, `deploy-fork.ts` and `smoke.ts` rewritten with Cursor so a three-level tree actually deploys and the Sepolia fork talks to live ENSv2. Device-or-software mandate signing, `scripts/agent.ts`, and MockSwap wiring paired with Cursor. |
 | `package.json`, `package-lock.json` | Jnyandeep | Forge / subgraph scripts and lockfile hygiene paired with Cursor. |
 | `.gitignore` | Jnyandeep | `/lib/` ignore (root leftover `forge install`, not `contracts/lib/` submodules) paired with Cursor. |
 | `prompts/` | RudyG07 | Planning artifacts required by the spec-driven-workflow rule; drafted with Claude Code. |
@@ -45,11 +45,16 @@ Adish7Pandya should amend their own rows if they used other tools.
 This is worth separating from build-time assistance, because it is the point of the
 project rather than a convenience.
 
-`agent/planner.ts` calls Claude Opus 5 at runtime to propose what a sub-agent should
-be allowed to do. The model is **not trusted**: its output is never filtered in
-TypeScript, every proposal is submitted to the chain, and the registry refuses
-anything outside the parent's scope. Refusals are logged, and the count is a
-published metric.
+`agent/planner.ts` calls a model at runtime — Gemini 3.6 Flash in our run, Claude if
+`ANTHROPIC_API_KEY` is set instead — to propose what a sub-agent should be allowed to
+do. The model is **not trusted**: its output is never filtered in TypeScript, every
+proposal is submitted to the chain, and the registry refuses anything outside the
+parent's scope. Every proposal is logged with the registry's verdict.
+
+In our run the model never exceeded its scope: 4 proposed, 4 accepted, 0 blocked. We
+report that rather than a number we could have manufactured by withholding the parent's
+budget from the prompt. The enforcement evidence is `contracts/test/Escalation.t.sol`,
+which is exhaustive where a model run is a sample.
 
 The structured-output schema constrains the **shape** of the reply so it always
 parses. It deliberately does **not** constrain the scope. Filtering the model's

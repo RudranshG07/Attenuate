@@ -33,7 +33,7 @@ Three properties follow:
 
 **Revocation is instant and total.** Each node stores an epoch and children record their parent's epoch at grant time. Bumping a parent's epoch is one storage write and every descendant is dead in the same block, at any depth.
 
-The root exists only because a human signed one EIP-712 mandate on a Ledger. There is no owner function that can seed it.
+The root exists only because someone signed one EIP-712 mandate that `GrantStore` recovers as `deviceKey`. There is no owner function that can seed it. Deploy scripts sign on Ledger/Speculos when one is reachable, otherwise they fall back to the deployer key and write `mandateSigner: "software"` into the deployment JSON.
 
 ## The AI part
 
@@ -70,16 +70,17 @@ Local demo, four commands:
 
 ```bash
 npm run chain          # anvil
-npm run deploy:local   # contracts, device-signed root mandate, and a three-level tree
+npm run deploy:local   # contracts, root mandate, and a three-level tree
 npm run smoke          # end-to-end: grant, execute, refuse, revoke, reclaim
 npm run web            # localhost:3000
 ```
 
-Against a fork of real Sepolia, using the live ENSv2 LabelStore:
+Against a fork of real Sepolia, using the live ENSv2 LabelStore and Uniswap V3:
 
 ```bash
-anvil --fork-url $SEPOLIA_RPC_URL
-npx tsx scripts/deploy-fork.ts
+npm run chain:fork
+npm run deploy:fork   # wires swap.uniswap to SwapRouter02
+npm run swap:fork     # 0.01 WETH → Circle USDC through the Executor
 ```
 
 Emulated Ledger, no hardware needed:
@@ -136,34 +137,48 @@ LIVE=1 RPC_URL=$SEPOLIA_RPC_URL npx tsx scripts/deploy-sepolia.ts
 
 ## Sub-agents are processes, not function calls
 
-Every name holds a key of its own. `Executor.execute` requires
-`msg.sender == STORE.agentOf(node)`, so a name is only usable by whoever holds it —
-delegation that can be watched rather than described.
+Every name holds a key of its own, derived from the label. `Executor.execute` requires
+`msg.sender == STORE.agentOf(node)`, so a name is only usable by whoever holds it.
 
 ```bash
-npm run agent exec  repay 5      # holds lend.aave.repay
-npm run agent probe repay 5      # read-only leaf
-ATTENUATE_AGENT_SEED=someone-else npm run agent exec repay 5
+ATTENUATE_AGENT_NAME=risk npm run agent
 ```
 
 ```
-agent exec.attenuate.eth   pid 25439  key 0xe160…e06e  holds true   EXECUTED repay
-agent probe.attenuate.eth  pid 25464  key 0x8190…f091  holds true   REFUSED  CAP_MISSING
-agent exec.attenuate.eth   pid 25505  key 0x42E2…11ab  holds false  REFUSED  NOT_AGENT
+risk      pid 36699  key 0x7f86…370A  agentOf 0x7f86…370A  holds true
+risk      health=1.300  delegate  health 1.30 approaching 1.5, delegating a read-only look
+  delegated riskzw6p -> 7513795392…  0xe621e2b8…
+  funded riskzw6p with 0.1 ETH for its own gas
+riskzw6p  pid 36743  key 0x1AFa…FC9A  agentOf 0x1AFa…FC9A  holds true
+riskzw6p  health=1.300  none  health 1.30 approaching but no delegation budget
 ```
 
-Separate processes, separate keys, three different outcomes decided on chain. `probe`
-is refused because its grant never held the capability; the third is refused because
-holding the name is not the same as knowing about it.
+A different process, with a different key, holding a name that did not exist a second
+ago. The parent funds it because a parent that delegates authority and withholds the
+gas to use it has delegated nothing.
 
-`probe` is also minted *by risk's key*, not the deployer's: risk is the registrar of
-the registry under its own name, so the deployer could not mint there if it tried.
+The refusals are the other half, and they are decided on chain rather than in the
+client:
+
+```bash
+ATTENUATE_AGENT_NAME=exec  npm run agent     # OVER_BUDGET, wants more than its cap
+ATTENUATE_AGENT_NAME=probe npm run agent     # CAP_MISSING, read-only leaf
+ATTENUATE_AGENT_SEED=someone-else ATTENUATE_AGENT_NAME=exec npm run agent
+```
+
+The third prints `holds false` and is refused `NOT_AGENT`: knowing a name is not the
+same as holding it. An impostor needs funding first, or it fails gas estimation before
+any permission check runs — which looks like enforcement and is not, so the agent says
+so rather than let it read that way.
+
+`probe` is minted *by risk's key*, not the deployer's: risk is the registrar of the
+registry under its own name, and the deployer has no rights there at all.
 
 ## What each partner does here
 
 **ENS.** Every prior project in this space stored agent policy in ENS text records and enforced it somewhere else. We inherit `PermissionedRegistry`, override the mint, and use hierarchical registries as the delegation chain itself. Enhanced Access Control splits granting from revoking, and withholding `ROLE_CAN_TRANSFER_ADMIN` makes a permission non-sellable. No child ever receives `ROLE_SET_RESOLVER`, because an agent that can repoint its own resolver can rewrite the permissions its name publishes.
 
-**Ledger.** One EIP-712 mandate signed on device is the only way the tree can exist. The broker releases scoped, expiring capabilities to sub-agents through the Key Ring and never a key. Development runs against Speculos, headless, with a one-command setup script.
+**Ledger.** `initRoot` recovers the EIP-712 mandate against `deviceKey`; a software signature is accepted only when that key is the deployer. Speculos is the development path (`./scripts/speculos.sh`, then `npm run speculos:approve`). Without a device, deploys record `mandateSigner: "software"` instead of claiming a Ledger was used.
 
 **The Graph.** A subgraph indexes the permission tree itself, so any agent's full history of grants, spends and refusals is one query. The MCP server lets any agent in any framework delegate under enforced budgets without ever seeing this project.
 

@@ -48,7 +48,9 @@ export async function GET() {
       const a = l.args as any;
       rows.push({
         id: l.transactionHash! + l.logIndex, kind: "mandate", name: "root",
-        detail: `root mandate signed on device, cap ${usdc(a.grant.spendCap)} USDC, depth ${a.grant.maxDepth}`,
+        detail: `root mandate signed${
+          d.mandateSigner === "device" ? " on device" : d.mandateSigner === "software" ? " in software" : ""
+        }, cap ${usdc(a.grant.spendCap)} USDC, depth ${a.grant.maxDepth}`,
         txHash: l.transactionHash!, block: l.blockNumber!, at: at(l.blockNumber!),
       });
     }

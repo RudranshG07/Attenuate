@@ -22,8 +22,9 @@ contracts/broadcast/
 subgraph/build/
 subgraph/generated/
 
-# indexer state
+# indexer state: a cursor is where the last run got to, not a fact about the project
 indexer/.cursor
+deployments/indexer-cursor.json
 
 # docs
 *.md

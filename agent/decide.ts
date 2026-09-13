@@ -67,7 +67,7 @@ export function decide(h: PositionHealth, grant: Grant): Decision {
 // makes the whole model theatre.
 export async function spawnSubAgent(name: string, node: bigint): Promise<void> {
   const { spawn } = await import("node:child_process");
-  const child = spawn(process.execPath, [process.argv[1] ?? "", "--as", name, "--node", node.toString()], {
+  const child = spawn("npx", ["tsx", "scripts/agent.ts"], {
     stdio: "inherit",
     env: { ...process.env, ATTENUATE_AGENT_NAME: name, ATTENUATE_AGENT_NODE: node.toString() },
     detached: false,

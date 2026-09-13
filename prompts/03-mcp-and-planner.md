@@ -40,5 +40,5 @@ proposed 5 · accepted 2 · blocked 3 · reachedExecution 0
 byReason: SCOPE_WIDENED 1, CAP_EXCEEDS_UNALLOCATED 1, DEPTH_EXCEEDED 1
 ```
 
-`reachedExecution` is structurally 0, not empirically 0: an out-of-scope grant can
-never execute because the name is never minted.
+`reachedExecution` counts accepted proposals that produced a mint transaction.
+Out-of-scope grants stay at zero because the name is never minted.

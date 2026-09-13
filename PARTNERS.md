@@ -266,28 +266,48 @@ of arbitrary depth stays indexable.
 **A push trigger with cursor resumption and reorg handling.** Two sources behind one
 interface: Substreams gRPC when a token is configured, chain head otherwise. Both
 persist a cursor and both detect reorgs by remembering block hashes across a
-confirmation window.
+confirmation window. We have run the chain-head source; the Substreams path is written
+against the same interface but we had no token to exercise it, and we would rather say
+so than imply otherwise.
 
-We tested reorg recovery against a **genuinely forced reorg**, not a simulated one:
+Reorg recovery is tested against a **genuinely forced reorg**, not a simulated one —
+`anvil_reorg` rewrites the chain's own history and the trigger has to notice from
+hashes it recorded beforehand:
+
+```bash
+npm run reorg
+```
 
 ```
-blocks seen 15, cursor persisted at 109
+blocks seen 27, cursor persisted at 112
 anvil_reorg depth 3 applied
-undo callback: revertedTo=106, 3 hashes dropped
-stale flag cleared, resumed at 113
+undo callback: revertedTo=109, 3 hashes dropped
+stale flag cleared, resumed at 118
+chain head 118, cursor 118  ->  recovered
 ```
 
 **x402 paid from the same budget the device authorised.** A gated endpoint answers 402,
 the agent pays, the request is retried — and the payment is debited through
 `Executor.execute` → `STORE.spendQuery`, the same enforcement path that governs moving
-money. There is no separate quota to reconcile:
+money. There is no separate quota to reconcile.
+
+The endpoint in `scripts/x402-demo.ts` is deliberately not a stub: it refuses until it
+is shown a transaction hash, then checks that hash on chain and that it went through
+the Executor before serving anything. Paying is the only way to obtain the data.
+
+```bash
+npm run x402
+```
 
 ```
-before queryRemaining = 100
-402 → paid → retry → data
-after  queryRemaining = 99, debited on chain
-OVER_QUERY_BUDGET when the grant runs out
+call  1  402 -> paid 1 -> 1.30   queryRemaining 39
+...
+call 40  402 -> paid 1 -> 1.30   queryRemaining 0
+call 41  refused: OVER_QUERY_BUDGET: needs 1, grant has 0
 ```
+
+Forty paid calls against `probe`'s 40-unit budget, each one a real debit, and the
+forty-first refused by the contract rather than by the client.
 
 ## The measurement
 
@@ -340,9 +360,9 @@ The enforcement evidence is therefore not anecdotal. `contracts/test/Escalation.
 is 21 tests, one per way a child can try to exceed its parent, and all 21 are refused
 at mint time. That is exhaustive where a model run is a sample.
 
-`reachedExecution` is **structurally** zero, not empirically zero: an out-of-scope
-grant can never execute because the name is never minted. That is the part that does
-not depend on which model proposed, or on how well it behaved on the day.
+`reachedExecution` counts accepted proposals that produced a mint transaction.
+Out-of-scope proposals stay at zero because the name is never minted. That refusal
+does not depend on which model proposed, or on how well it behaved on the day.
 
 The design line worth stating: structured output constrains the *shape* of the model's
 reply so it always parses, and deliberately **not** the scope. Filtering the proposal
