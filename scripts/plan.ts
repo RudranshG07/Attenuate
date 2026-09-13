@@ -1,3 +1,4 @@
+import "./lib/load-env.js";
 /**
  * Runs the planner against a real chain and records what the registry did with each
  * proposal.

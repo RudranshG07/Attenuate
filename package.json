@@ -14,7 +14,7 @@
     "web": "next dev web -p 3000",
     "web:build": "next build web",
     "chain": "anvil",
-    "chain:fork": "anvil --fork-url ${SEPOLIA_RPC_URL:-https://ethereum-sepolia-rpc.publicnode.com} --port 8545",
+    "chain:fork": "bash -lc 'set -a; [ -f .env ] && . ./.env; set +a; anvil --fork-url \"${SEPOLIA_RPC_URL:-https://ethereum-sepolia.publicnode.com}\" --port 8545'",
     "deploy:local": "tsx scripts/deploy-local.ts",
     "deploy:fork": "tsx scripts/deploy-fork.ts",
     "deploy:forge": "forge script --root contracts script/Deploy.s.sol:Deploy --rpc-url http://127.0.0.1:8545 --broadcast",

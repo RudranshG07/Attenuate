@@ -1,9 +1,12 @@
 import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
 
-const envPath = resolve(process.cwd().replace(/\/web$/, ""), ".env");
-if (existsSync(envPath)) {
-  for (const raw of readFileSync(envPath, "utf8").split(/\r?\n/)) {
+let loaded = false;
+
+export function loadEnv(path = ".env") {
+  if (loaded) return;
+  loaded = true;
+  if (!existsSync(path)) return;
+  for (const raw of readFileSync(path, "utf8").split(/\r?\n/)) {
     const line = raw.trim();
     if (!line || line.startsWith("#")) continue;
     const i = line.indexOf("=");
@@ -20,5 +23,4 @@ if (existsSync(envPath)) {
   }
 }
 
-const nextConfig = { reactStrictMode: true };
-export default nextConfig;
+loadEnv();
