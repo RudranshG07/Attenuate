@@ -38,7 +38,10 @@ files, and who authored what.
 | `FEEDBACK.md`, `PARTNERS.md` | RudyG07 | Paired with Claude Code. |
 | `AI-USE.md` | RudyG07, Jnyandeep | First draft with Claude Code; Jnyandeep's Cursor rows added in Cursor. |
 
-Adish7Pandya should amend their own rows if they used other tools.
+Adish7Pandya's contribution is mostly product rather than code: the idea, what the
+three partner tracks needed from us, what was in scope and what was cut. The rows above
+are the parts that reached the repo as commits, and Adish7Pandya should amend them if
+they used other tools.
 
 ## The model is also a runtime component
 

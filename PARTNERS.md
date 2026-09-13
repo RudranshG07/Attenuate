@@ -324,10 +324,15 @@ BENCH_BLOCKS=25 npx tsx indexer/benchmark.ts
 
 ```
 blocks observed            25
-push median lag             0 ms
-polling median lag        593 ms
+push median lag             0 ms      (1005 ms on a --block-time 1 chain)
+polling median lag        593 ms      (1829 ms on the same run)
 blocks polling never saw   18
 ```
+
+The lag figures move with how the chain produces blocks, so the durable number is the
+last one: **18 of 25 blocks the poller never observed at all**. That count is stable
+across runs because it follows from the poll interval being longer than the block time,
+not from timing noise.
 
 Eighteen of twenty-five blocks the poller never observed at all. That is the stronger
 half: polling is not merely slower, it *skips* blocks, and every skipped block is a

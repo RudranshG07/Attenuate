@@ -22,20 +22,44 @@ async function speculosUrl(): Promise<string | undefined> {
   return undefined;
 }
 
+/**
+ * Speculos shows the same confirmation screens a real Nano does, and nobody is there
+ * to press them during a deploy. An emulator left unattended is why a deploy appears
+ * to hang and then writes an empty deployment, so we drive the buttons ourselves for
+ * the duration and stop when the signature lands. A real device is never touched by
+ * this: it only runs when the emulator is the thing we found.
+ */
+async function autoApprove(url: string): Promise<() => void> {
+  if (process.env.SPECULOS_NO_AUTO_APPROVE === "1") return () => {};
+  const { driveApprovals } = await import("../speculos-approve.js");
+  return driveApprovals(url);
+}
+
 export async function resolveMandateSigner(wallet: WalletClient): Promise<MandateSigner> {
   const url = await speculosUrl();
   if (url) {
     process.env.LEDGER_SPECULOS_URL = url;
-    console.log(`  device reachable at ${url}`);
-    console.log("  if signing hangs, run `npm run speculos:approve` in another terminal");
+    console.log(`  device reachable at ${url}, answering its prompts automatically`);
     const { getAddress } = await import("../../broker/device.js");
     const { signRootMandate } = await import("../../broker/mandate.js");
-    const address = await getAddress();
-    return {
-      address,
-      kind: "device",
-      sign: (chainId, store, mandate) => signRootMandate(chainId, store, mandate),
-    };
+    const stop = await autoApprove(url);
+    try {
+      const address = await getAddress();
+      return {
+        address,
+        kind: "device",
+        sign: async (chainId, store, mandate) => {
+          try {
+            return await signRootMandate(chainId, store, mandate);
+          } finally {
+            stop();
+          }
+        },
+      };
+    } catch (e) {
+      stop();
+      throw e;
+    }
   }
 
   const address = wallet.account!.address;

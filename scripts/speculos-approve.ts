@@ -13,9 +13,9 @@
 const API = process.env.LEDGER_SPECULOS_URL ?? "http://localhost:5001";
 const REJECT = process.env.SPECULOS_REJECT === "1";
 
-const screen = async (): Promise<string> => {
+const screen = async (base = API): Promise<string> => {
   try {
-    const r = await fetch(`${API}/events?currentscreenonly=true`);
+    const r = await fetch(`${base}/events?currentscreenonly=true`);
     const j = (await r.json()) as { events: { text: string }[] };
     return j.events.map((e) => e.text).join(" ");
   } catch {
@@ -23,8 +23,8 @@ const screen = async (): Promise<string> => {
   }
 };
 
-const press = async (b: "left" | "right" | "both") => {
-  await fetch(`${API}/button/${b}`, {
+const press = async (b: "left" | "right" | "both", base = API) => {
+  await fetch(`${base}/button/${b}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action: "press-and-release" }),
@@ -37,6 +37,34 @@ const ENTER_FLOW = /Blind signing ahead|Review typed|Sign typed/i;
 const CONFIRM = /^Sign message|^Approve|press\s+both\s+buttons/i;
 const DECLINE = /^Reject/i;
 const DONE = /Message signed|rejected/i;
+
+/**
+ * Drive the prompts until stopped. Exported so a deploy can answer its own emulator
+ * in-process rather than spawning a second one it then has to hunt down and kill.
+ */
+export function driveApprovals(apiUrl = API): () => void {
+  let stopped = false;
+  void (async () => {
+    let inFlow = false;
+    for (;;) {
+      if (stopped) return;
+      const s = await screen(apiUrl);
+      if (DONE.test(s)) {
+        await press("both", apiUrl);
+        inFlow = false;
+      } else if (ENTER_FLOW.test(s)) {
+        inFlow = true;
+        await press(CONFIRM.test(s) ? "both" : "right", apiUrl);
+      } else if (inFlow) {
+        if (REJECT ? DECLINE.test(s) : CONFIRM.test(s)) await press("both", apiUrl);
+        else await press("right", apiUrl);
+      } else {
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    }
+  })();
+  return () => { stopped = true; };
+}
 
 async function main() {
   let inFlow = false;
@@ -66,4 +94,4 @@ async function main() {
   }
 }
 
-main();
+if (process.argv[1]?.endsWith("speculos-approve.ts")) main();

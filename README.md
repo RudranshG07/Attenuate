@@ -236,4 +236,4 @@ Dependencies used as-is: `ensdomains/contracts-v2` (ENSv2, inherited from), Open
 |---|---|
 | RudyG07 | ENS integration, Ledger and Speculos, broker, subgraph, web |
 | Jnyandeep | Contracts, test suite, gas harness, deploy scripts |
-| Adish7Pandya | MCP tool definitions, SKILL.md, planner types, benchmark |
+| Adish7Pandya | Product: the idea, scope and partner-track decisions. Also authored the MCP tool definitions, SKILL.md, planner types and benchmark shape. |
